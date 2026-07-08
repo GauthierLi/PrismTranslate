@@ -1,0 +1,16 @@
+# Build artifacts
+build/
+*.app/
+*.dmg
+
+# macOS
+.DS_Store
+
+# Generated icon set (regenerated from Resources/logo.png)
+Resources/AppIcon.iconset/
+Resources/logo_square.png
+
+# Editor/IDE
+.vscode/
+.idea/
+*.xcuserstate
