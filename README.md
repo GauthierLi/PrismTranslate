@@ -26,7 +26,7 @@
 PrismTranslate/
 ├── build.sh                    # 编译为 棱镜翻译.app（含图标注入、ad-hoc 签名）
 ├── make_dmg.sh                 # 打包为 棱镜翻译.dmg
-├── ClipTranslate/              # Swift 源码
+├── PrismTranslate/             # Swift 源码
 │   ├── Main.swift              # @main 程序入口
 │   ├── AppDelegate.swift       # 菜单栏、全局快捷键、剪贴板监听、翻译流程编排
 │   ├── AppSettings.swift       # 用户设置、持久化、语言与协议定义
@@ -46,7 +46,7 @@ PrismTranslate/
 ./make_dmg.sh     # 产物：build/棱镜翻译.dmg
 ```
 
-`build.sh` 会用 `swiftc` 直接编译 `ClipTranslate/*.swift`，写入 `Info.plist`（`LSUIElement=true`，即仅菜单栏、无 Dock 图标），复制 `AppIcon.icns`，并做 ad-hoc 代码签名以便本机运行。
+`build.sh` 会用 `swiftc` 直接编译 `PrismTranslate/*.swift`，写入 `Info.plist`（`LSUIElement=true`，即仅菜单栏、无 Dock 图标），复制 `AppIcon.icns`，并做 ad-hoc 代码签名以便本机运行。
 
 如需从 `Resources/logo.png` 重新生成图标，可参考以下步骤生成 `AppIcon.iconset` 后用 `iconutil -c icns` 打包（图标为运行 `build.sh` 的前置资源，已随仓库提供）。
 

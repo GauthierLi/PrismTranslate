@@ -4,7 +4,7 @@ set -euo pipefail
 APP_NAME="棱镜翻译"          # bundle / display name (Chinese)
 EXE_NAME="PrismTranslate"    # ASCII executable name
 BUNDLE_ID="com.prismtranslate.app"
-SRC_DIR="ClipTranslate"
+SRC_DIR="PrismTranslate"
 BUILD_DIR="build"
 APP_DIR="$BUILD_DIR/$APP_NAME.app"
 MACOS_DIR="$APP_DIR/Contents/MacOS"
