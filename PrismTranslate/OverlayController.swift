@@ -47,15 +47,17 @@ final class OverlayController {
         model.fontSize = fontSize
         model.isError = false
         model.showPin = true
+        model.selectable = true
         present(autoHide: autoHideSeconds)
     }
 
-    func showLoading(fontSize: Double) {
+    func showLoading(_ message: String = "翻译中…", fontSize: Double) {
         model.original = nil
-        model.translated = "翻译中…"
+        model.translated = message
         model.fontSize = fontSize
         model.isError = false
         model.showPin = false
+        model.selectable = false
         present(autoHide: 0)
     }
 
@@ -65,6 +67,7 @@ final class OverlayController {
         model.fontSize = fontSize
         model.isError = true
         model.showPin = false
+        model.selectable = false
         present(autoHide: 6)
     }
 
@@ -82,6 +85,11 @@ final class OverlayController {
         panel.isMovableByWindowBackground = !model.isPinned
         layout(panel)
         panel.orderFrontRegardless()
+        // Selectable subtitles need to be the key window so drag-select and
+        // ⌘C copy are routed to the SwiftUI text; loading/error do not.
+        if model.selectable {
+            panel.makeKey()
+        }
         rescheduleHide()
     }
 
@@ -100,7 +108,7 @@ final class OverlayController {
 
     private func ensureWindow() -> NSPanel {
         if let window { return window }
-        let panel = NSPanel(
+        let panel = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: 480, height: 120),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -220,6 +228,7 @@ final class OverlayModel: ObservableObject {
     @Published var fontSize: Double = 22
     @Published var isError: Bool = false
     @Published var showPin: Bool = true
+    @Published var selectable: Bool = false
     @Published var contentWidth: CGFloat = 320
 
     @Published var isHovering: Bool = false {
@@ -257,6 +266,7 @@ private struct OverlayView: View {
                     .multilineTextAlignment(.center)
                     .frame(width: model.contentWidth, alignment: .center)
                     .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
             Text(model.translated)
                 .font(.system(size: model.fontSize, weight: .semibold))
@@ -264,6 +274,7 @@ private struct OverlayView: View {
                 .multilineTextAlignment(.center)
                 .frame(width: model.contentWidth, alignment: .center)
                 .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 14)
@@ -299,4 +310,10 @@ private struct OverlayView: View {
             model.isHovering = hovering
         }
     }
+}
+
+/// A borderless panel that is still allowed to become the key window, so
+/// selectable subtitle text can receive drag-select and ⌘C copy commands.
+final class KeyablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
 }

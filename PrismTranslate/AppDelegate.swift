@@ -6,6 +6,7 @@ import Combine
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     let settings = AppSettings()
     private let overlay = OverlayController()
+    private let floatingBall = FloatingBallController()
 
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
@@ -20,12 +21,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         NSApp.setActivationPolicy(.accessory) // menu-bar only, no dock icon
         setupStatusItem()
         setupHotkey()
+        setupFloatingBall()
         applyClipboardWatch()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         HotkeyManager.shared.unregister()
         clipTimer?.invalidate()
+        floatingBall.hide()
     }
 
     // MARK: - Status bar menu
@@ -44,10 +47,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let menu = NSMenu()
         menu.delegate = self
 
-        let translateItem = NSMenuItem(title: "翻译剪贴板内容", action: #selector(translateClipboardNow), keyEquivalent: "t")
-        translateItem.keyEquivalentModifierMask = [.command, .shift]
-        translateItem.target = self
-        menu.addItem(translateItem)
+        // Primary action adapts to the current mode.
+        if settings.appMode == .ocr {
+            let ocrItem = NSMenuItem(title: "截图识别 (OCR)", action: #selector(runOCRNow), keyEquivalent: "t")
+            ocrItem.keyEquivalentModifierMask = [.command, .shift]
+            ocrItem.target = self
+            menu.addItem(ocrItem)
+        } else {
+            let translateItem = NSMenuItem(title: "翻译剪贴板内容", action: #selector(translateClipboardNow), keyEquivalent: "t")
+            translateItem.keyEquivalentModifierMask = [.command, .shift]
+            translateItem.target = self
+            menu.addItem(translateItem)
+        }
+
+        // Mode switch submenu.
+        let modeItem = NSMenuItem(title: "功能", action: nil, keyEquivalent: "")
+        let modeMenu = NSMenu()
+        for mode in AppMode.allCases {
+            let mi = NSMenuItem(title: mode.label, action: #selector(selectMode(_:)), keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = mode.rawValue
+            mi.state = (settings.appMode == mode) ? .on : .off
+            modeMenu.addItem(mi)
+        }
+        modeItem.submenu = modeMenu
+        menu.addItem(modeItem)
 
         let hideItem = NSMenuItem(title: "隐藏字幕", action: #selector(hideOverlay), keyEquivalent: "")
         hideItem.target = self
@@ -73,6 +97,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         watchItem.state = settings.autoWatchClipboard ? .on : .off
         menu.addItem(watchItem)
 
+        let ballItem = NSMenuItem(title: "显示悬浮球", action: #selector(toggleFloatingBall), keyEquivalent: "")
+        ballItem.target = self
+        ballItem.state = settings.showFloatingBall ? .on : .off
+        menu.addItem(ballItem)
+
         menu.addItem(.separator())
 
         let settingsItem = NSMenuItem(title: "设置…", action: #selector(openSettings), keyEquivalent: ",")
@@ -89,9 +118,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     private func setupHotkey() {
         HotkeyManager.shared.onFire = { [weak self] in
-            self?.translateClipboardNow()
+            self?.primaryAction()
         }
         HotkeyManager.shared.register()
+    }
+
+    // MARK: - Floating ball
+
+    private func setupFloatingBall() {
+        floatingBall.onRequestMenu = { [weak self] in
+            self?.buildBallMenu() ?? NSMenu()
+        }
+        applyFloatingBall()
+    }
+
+    /// Menu shown when the floating ball is clicked. Mirrors the menu-bar
+    /// actions but is scoped to the ball.
+    private func buildBallMenu() -> NSMenu {
+        let menu = NSMenu()
+
+        // Primary action for the current mode.
+        if settings.appMode == .ocr {
+            let ocrItem = NSMenuItem(title: "截图识别 (OCR)", action: #selector(runOCRNow), keyEquivalent: "")
+            ocrItem.target = self
+            menu.addItem(ocrItem)
+        } else {
+            let translateItem = NSMenuItem(title: "翻译剪贴板内容", action: #selector(translateClipboardNow), keyEquivalent: "")
+            translateItem.target = self
+            menu.addItem(translateItem)
+        }
+
+        // Mode switch.
+        let modeItem = NSMenuItem(title: "功能", action: nil, keyEquivalent: "")
+        let modeMenu = NSMenu()
+        for mode in AppMode.allCases {
+            let mi = NSMenuItem(title: mode.label, action: #selector(selectMode(_:)), keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = mode.rawValue
+            mi.state = (settings.appMode == mode) ? .on : .off
+            modeMenu.addItem(mi)
+        }
+        modeItem.submenu = modeMenu
+        menu.addItem(modeItem)
+
+        menu.addItem(.separator())
+
+        let watchItem = NSMenuItem(title: "自动监听粘贴板", action: #selector(toggleWatch), keyEquivalent: "")
+        watchItem.target = self
+        watchItem.state = settings.autoWatchClipboard ? .on : .off
+        menu.addItem(watchItem)
+
+        let hideItem = NSMenuItem(title: "隐藏字幕", action: #selector(hideOverlay), keyEquivalent: "")
+        hideItem.target = self
+        menu.addItem(hideItem)
+
+        return menu
+    }
+
+    func applyFloatingBall() {
+        if settings.showFloatingBall {
+            floatingBall.show()
+        } else {
+            floatingBall.hide()
+        }
     }
 
     // MARK: - Clipboard watching
@@ -132,9 +221,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         overlay.hide()
     }
 
+    /// Fired by the hotkey / ball; routes to translate or OCR by mode.
+    @objc func primaryAction() {
+        if settings.appMode == .ocr {
+            runOCRNow()
+        } else {
+            translateClipboardNow()
+        }
+    }
+
+    @objc func selectMode(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let mode = AppMode(rawValue: raw) else { return }
+        settings.appMode = mode
+        statusItem?.menu = buildMenu()
+    }
+
+    @objc func runOCRNow() {
+        let fontSize = settings.overlayFontSize
+        let seconds = settings.overlaySeconds
+        // Vision recognition languages: bias by target language, always allow
+        // English + Simplified/Traditional Chinese which cover the common cases.
+        let langs = ocrLanguages(for: settings.targetLanguage)
+        overlay.hide()
+        Task { @MainActor in
+            do {
+                let text = try await OCRService.captureAndRecognize(languages: langs)
+                // OCR result is shown directly as a selectable subtitle (no
+                // translation), line breaks already removed by the service.
+                overlay.show(original: nil, translated: text, autoHideSeconds: seconds, fontSize: fontSize, showOriginal: false)
+                lastStatus = "已识别"
+            } catch OCRService.OCRError.cancelled {
+                lastStatus = "已取消"
+            } catch {
+                let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                overlay.showError(msg, fontSize: fontSize)
+                lastStatus = "错误"
+            }
+        }
+    }
+
+    /// Preferred Vision recognition languages, with sensible fallbacks.
+    private func ocrLanguages(for target: String) -> [String] {
+        var langs: [String] = []
+        switch target {
+        case "zh-Hans": langs = ["zh-Hans", "en-US"]
+        case "zh-Hant": langs = ["zh-Hant", "en-US"]
+        case "ja": langs = ["ja-JP", "en-US"]
+        case "ko": langs = ["ko-KR", "en-US"]
+        default: langs = ["en-US", "zh-Hans"]
+        }
+        return langs
+    }
+
     @objc func toggleWatch() {
         settings.autoWatchClipboard.toggle()
         applyClipboardWatch()
+        statusItem?.menu = buildMenu()
+    }
+
+    @objc func toggleFloatingBall() {
+        settings.showFloatingBall.toggle()
+        applyFloatingBall()
         statusItem?.menu = buildMenu()
     }
 
@@ -151,6 +299,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             return
         }
         let view = SettingsView(settings: settings, onProviderChange: { [weak self] in
+            self?.statusItem?.menu = self?.buildMenu()
+        }, onFloatingBallChange: { [weak self] in
+            self?.applyFloatingBall()
             self?.statusItem?.menu = self?.buildMenu()
         })
         let hosting = NSHostingController(rootView: view)

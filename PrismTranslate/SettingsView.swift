@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     var onProviderChange: () -> Void = {}
+    var onFloatingBallChange: () -> Void = {}
 
     @State private var testing = false
     @State private var testResult: String?
@@ -10,6 +11,23 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                section("功能模式") {
+                    Picker("模式", selection: Binding(
+                        get: { settings.appMode },
+                        set: { settings.appMode = $0 })
+                    ) {
+                        ForEach(AppMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Text(settings.appMode == .ocr
+                         ? "OCR：按 ⌘⇧T 或点悬浮球截图，识别文本（去掉换行）显示为字幕，可拖动选词后 ⌘C 复制。首次使用需在“系统设置 → 隐私与安全性 → 屏幕录制”授权。"
+                         : "翻译：按 ⌘⇧T 或开启自动监听，翻译剪贴板文本并显示字幕，字幕可拖动选词后 ⌘C 复制。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 section("接口协议") {
                     Picker("协议", selection: Binding(
                         get: { settings.provider },
@@ -54,6 +72,10 @@ struct SettingsView: View {
                     Toggle("自动监听剪贴板变化", isOn: Binding(
                         get: { settings.autoWatchClipboard },
                         set: { settings.autoWatchClipboard = $0 })
+                    )
+                    Toggle("显示悬浮球", isOn: Binding(
+                        get: { settings.showFloatingBall },
+                        set: { settings.showFloatingBall = $0; onFloatingBallChange() })
                     )
                     HStack {
                         Text("字号")

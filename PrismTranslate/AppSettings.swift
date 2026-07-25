@@ -29,6 +29,22 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+/// Primary function of the app: translate clipboard/text, or OCR from a
+/// screenshot selection.
+enum AppMode: String, CaseIterable, Identifiable, Codable {
+    case translate
+    case ocr
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .translate: return "翻译"
+        case .ocr: return "OCR 识别"
+        }
+    }
+}
+
 /// A single selectable target/source language option.
 struct LanguageOption: Identifiable, Hashable {
     let id: String   // stable code we send to the model, e.g. "zh-Hans"
@@ -73,6 +89,22 @@ final class AppSettings: ObservableObject {
     @AppStorage("overlaySeconds") var overlaySeconds: Double = 8.0
     @AppStorage("overlayFontSize") var overlayFontSize: Double = 22.0
     @AppStorage("showOriginal") var showOriginal: Bool = true
+
+    // Floating ball
+    @AppStorage("showFloatingBall") var showFloatingBall: Bool = true
+
+    // Primary mode (translate / ocr)
+    @AppStorage("appMode") var appModeRaw: String = AppMode.translate.rawValue {
+        didSet { objectWillChange.send() }
+    }
+
+    var appMode: AppMode {
+        get { AppMode(rawValue: appModeRaw) ?? .translate }
+        set {
+            appModeRaw = newValue.rawValue
+            objectWillChange.send()
+        }
+    }
 
     var provider: ProviderKind {
         get { ProviderKind(rawValue: providerRaw) ?? .openai }
