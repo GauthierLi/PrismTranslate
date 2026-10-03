@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     let settings = AppSettings()
     private let overlay = OverlayController()
     private let floatingBall = FloatingBallController()
+    private let ollamaModelStore = OllamaModelStore()
 
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
@@ -19,16 +20,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // menu-bar only, no dock icon
+        setupMainMenu()
         setupStatusItem()
         setupHotkey()
         setupFloatingBall()
         applyClipboardWatch()
+        refreshOllamaModelsIfNeeded()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         HotkeyManager.shared.unregister()
         clipTimer?.invalidate()
         floatingBall.hide()
+    }
+
+    // MARK: - Main menu (enables standard ⌘C / ⌘A on selectable subtitles)
+
+    /// An accessory/LSUIElement app has no menu bar by default, so keyboard
+    /// shortcuts like ⌘C are never matched. We install a minimal main menu with
+    /// an Edit submenu so the standard `copy:` / `selectAll:` commands are
+    /// dispatched through the responder chain to the focused subtitle text.
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+
+        // App menu (holds Quit so ⌘Q keeps working).
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "退出 棱镜翻译", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+
+        // Edit menu with the standard editing commands.
+        let editMenuItem = NSMenuItem()
+        let editMenu = NSMenu(title: "编辑")
+        editMenu.addItem(withTitle: "拷贝", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
+
+        NSApp.mainMenu = mainMenu
+    }
+
+    private func refreshOllamaModelsIfNeeded() {
+        guard settings.provider == .ollama, !ollamaModelStore.isRefreshing else { return }
+
+        Task { @MainActor in
+            do {
+                let discovered = try await ollamaModelStore.refresh()
+                let current = settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !discovered.contains(where: { $0.name == current }) {
+                    settings.model = discovered.first?.name ?? ""
+                }
+            } catch {
+                lastStatus = "Ollama 不可用"
+            }
+        }
     }
 
     // MARK: - Status bar menu
@@ -294,11 +340,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     @objc func openSettings() {
         if let win = settingsWindow {
+            refreshOllamaModelsIfNeeded()
             win.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-        let view = SettingsView(settings: settings, onProviderChange: { [weak self] in
+        refreshOllamaModelsIfNeeded()
+        let view = SettingsView(settings: settings, ollamaModels: ollamaModelStore, onProviderChange: { [weak self] in
+            self?.refreshOllamaModelsIfNeeded()
             self?.statusItem?.menu = self?.buildMenu()
         }, onFloatingBallChange: { [weak self] in
             self?.applyFloatingBall()
@@ -321,7 +370,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     private func translate(text: String) {
         guard settings.isConfigured else {
-            overlay.showError("请先在设置中填写 API Key 与接口地址。", fontSize: settings.overlayFontSize)
+            let message = settings.provider == .ollama
+                ? "请先启动 Ollama，并在设置中选择一个已安装的模型。"
+                : "请先在设置中填写 API Key、接口地址和模型。"
+            overlay.showError(message, fontSize: settings.overlayFontSize)
             openSettings()
             return
         }

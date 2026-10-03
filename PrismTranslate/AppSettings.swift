@@ -4,6 +4,7 @@ import SwiftUI
 enum ProviderKind: String, CaseIterable, Identifiable, Codable {
     case openai
     case anthropic
+    case ollama
 
     var id: String { rawValue }
 
@@ -11,6 +12,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .openai: return "OpenAI 协议"
         case .anthropic: return "Anthropic 协议"
+        case .ollama: return "Ollama 本地"
         }
     }
 
@@ -18,6 +20,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .openai: return "https://api.openai.com/v1"
         case .anthropic: return "https://api.anthropic.com/v1"
+        case .ollama: return OllamaClient.defaultBaseURL
         }
     }
 
@@ -25,6 +28,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .openai: return "gpt-4o-mini"
         case .anthropic: return "claude-3-5-sonnet-latest"
+        case .ollama: return ""
         }
     }
 }
@@ -121,7 +125,29 @@ final class AppSettings: ObservableObject {
     }
 
     var isConfigured: Bool {
-        !apiKey.trimmingCharacters(in: .whitespaces).isEmpty &&
-        !baseURL.trimmingCharacters(in: .whitespaces).isEmpty
+        Self.isConfigured(
+            provider: provider,
+            apiKey: apiKey,
+            baseURL: baseURL,
+            model: model
+        )
+    }
+
+    static func isConfigured(
+        provider: ProviderKind,
+        apiKey: String,
+        baseURL: String,
+        model: String
+    ) -> Bool {
+        let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedModel.isEmpty else { return false }
+
+        switch provider {
+        case .ollama:
+            return true
+        case .openai, .anthropic:
+            return !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
     }
 }

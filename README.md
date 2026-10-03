@@ -1,12 +1,13 @@
 # 棱镜翻译 (PrismTranslate)
 
-一个 macOS 菜单栏小工具：把复制的文本通过 AI 接口翻译，并以悬浮字幕的形式显示在屏幕上。支持 OpenAI 与 Anthropic 两种协议，可自定义接口地址、模型与目标语言。
+一个 macOS 菜单栏小工具：把复制的文本通过 AI 接口翻译，并以悬浮字幕的形式显示在屏幕上。支持 OpenAI、Anthropic 与 Ollama 本地模型，可自定义远程接口地址、模型与目标语言。
 
 ![logo](Resources/logo.png)
 
 ## 功能特性
 
-- 双协议支持：OpenAI 兼容接口（`POST {BaseURL}/chat/completions`）与 Anthropic 兼容接口（`POST {BaseURL}/messages`），可填写自定义 Base URL、模型名与 API Key，兼容各类中转端点。
+- 三种翻译驱动：OpenAI 兼容接口（`POST {BaseURL}/chat/completions`）、Anthropic 兼容接口（`POST {BaseURL}/messages`）与 Ollama 本地接口（`POST http://127.0.0.1:11434/api/chat`）。
+- Ollama 本地模式：自动探测本机已下载的 Ollama 模型，直接选择模型即可使用，不需要填写 API Key、接口地址或模型名，也不会自动下载模型。
 - 一键翻译剪贴板：全局快捷键 `⌘⇧T` 翻译当前剪贴板内容；也可开启“自动监听剪贴板”，复制即译。
 - 多语言：目标语言可在菜单栏或设置中切换（简/繁中文、英、日、韩、法、德、西、俄、葡、意、阿、泰、越等），源语言可设为自动检测。
 - 本地语言判断：使用 Apple `NaturalLanguage` 框架在本地离线判断，若复制内容已经是目标语言，则直接跳过翻译，不发起网络请求。
@@ -18,7 +19,7 @@
 
 - macOS 13 及以上（Apple Silicon / arm64）。
 - 需要 Xcode Command Line Tools（提供 `swiftc`、`iconutil`、`hdiutil` 等）。
-- 一个可用的 OpenAI 或 Anthropic 兼容接口及其 API Key。
+- 远程模式需要一个可用的 OpenAI 或 Anthropic 兼容接口及其 API Key；Ollama 模式需要本机已安装并运行 Ollama。
 
 ## 目录结构
 
@@ -30,7 +31,8 @@ PrismTranslate/
 │   ├── Main.swift              # @main 程序入口
 │   ├── AppDelegate.swift       # 菜单栏、全局快捷键、剪贴板监听、翻译流程编排
 │   ├── AppSettings.swift       # 用户设置、持久化、语言与协议定义
-│   ├── Translator.swift        # OpenAI / Anthropic 协议请求与解析
+│   ├── Translator.swift        # OpenAI / Anthropic / Ollama 翻译分流
+│   ├── OllamaClient.swift      # Ollama 模型探测、请求与响应解析
 │   ├── LanguageDetector.swift  # 本地离线语言检测（跳过同语言翻译）
 │   ├── OverlayController.swift # 悬浮字幕窗口：尺寸计算、拖动、pin、自动消失
 │   └── SettingsView.swift      # 设置界面（SwiftUI）
@@ -54,14 +56,14 @@ PrismTranslate/
 
 1. 打开 `棱镜翻译.app`（或从 `棱镜翻译.dmg` 拖入“应用程序”）。首次打开若被 Gatekeeper 拦截：右键 →“打开”，或在“系统设置 → 隐私与安全性”中点“仍要打开”。
 2. 应用仅在菜单栏显示（棱镜图标），无 Dock 图标。
-3. 点击菜单 →“设置…”，选择协议，填入 Base URL、模型与 API Key，可用“测试翻译”验证连通性。
+3. 点击菜单 →“设置…”，选择协议。OpenAI/Anthropic 模式填写 Base URL、模型与 API Key；Ollama 模式会自动探测本机模型，直接选择即可。可用“测试翻译”验证连通性。
 4. 复制任意文本，按 `⌘⇧T`（或开启“自动监听剪贴板”）即可翻译并显示字幕。
 
 ## 权限与隐私
 
 - 全局快捷键基于 Carbon HotKey，无需辅助功能权限。
 - 仅读取系统剪贴板中的文本用于翻译。
-- API Key 保存在本地 `UserDefaults`（明文），仅用于向你配置的接口发起请求，不上传到其他任何服务。
+- 远程 API Key 保存在本地 `UserDefaults`（明文），仅用于向你配置的接口发起请求，不上传到其他任何服务。Ollama 模式只访问本机 `127.0.0.1:11434`。
 
 ## 分发说明
 

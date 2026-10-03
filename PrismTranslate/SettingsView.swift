@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
+    @ObservedObject var ollamaModels: OllamaModelStore
     var onProviderChange: () -> Void = {}
     var onFloatingBallChange: () -> Void = {}
 
@@ -44,14 +45,59 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    labeledField("接口地址 (Base URL)", text: $settings.baseURL)
-                    labeledField("模型 (Model)", text: $settings.model)
-                    SecureFieldRow(title: "API Key", text: $settings.apiKey)
-                    Text(settings.provider == .openai
-                         ? "使用 OpenAI 兼容接口：POST {BaseURL}/chat/completions"
-                         : "使用 Anthropic 兼容接口：POST {BaseURL}/messages")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if settings.provider == .ollama {
+                        HStack(alignment: .center, spacing: 10) {
+                            Picker("模型", selection: $settings.model) {
+                                if ollamaModels.models.isEmpty {
+                                    Text("未发现本地模型").tag("")
+                                }
+                                ForEach(ollamaModels.models) { model in
+                                    Text(model.name).tag(model.name)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Button {
+                                refreshOllamaModels()
+                            } label: {
+                                HStack(spacing: 5) {
+                                    if ollamaModels.isRefreshing {
+                                        ProgressView().controlSize(.small)
+                                    }
+                                    Text("刷新模型")
+                                }
+                            }
+                            .disabled(ollamaModels.isRefreshing)
+                        }
+
+                        if let errorMessage = ollamaModels.errorMessage {
+                            Text(errorMessage)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .textSelection(.enabled)
+                        } else if ollamaModels.isRefreshing {
+                            Text("正在探测本机 Ollama 模型…")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else if ollamaModels.models.isEmpty {
+                            Text("未发现已下载模型。请先启动 Ollama 并下载至少一个模型。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text("使用本机 Ollama（http://127.0.0.1:11434），无需 API Key 或手动填写模型名。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        labeledField("接口地址 (Base URL)", text: $settings.baseURL)
+                        labeledField("模型 (Model)", text: $settings.model)
+                        SecureFieldRow(title: "API Key", text: $settings.apiKey)
+                        Text(settings.provider == .openai
+                             ? "使用 OpenAI 兼容接口：POST {BaseURL}/chat/completions"
+                             : "使用 Anthropic 兼容接口：POST {BaseURL}/messages")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 section("语言") {
@@ -121,6 +167,11 @@ struct SettingsView: View {
             .padding(22)
         }
         .frame(minWidth: 460, minHeight: 540)
+        .onAppear {
+            if settings.provider == .ollama {
+                refreshOllamaModels()
+            }
+        }
     }
 
     private func runTest() {
@@ -138,6 +189,22 @@ struct SettingsView: View {
                 testResult = "失败：" + msg
             }
             testing = false
+        }
+    }
+
+    private func refreshOllamaModels() {
+        guard settings.provider == .ollama, !ollamaModels.isRefreshing else { return }
+
+        Task { @MainActor in
+            do {
+                let discovered = try await ollamaModels.refresh()
+                let current = settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !discovered.contains(where: { $0.name == current }) {
+                    settings.model = discovered.first?.name ?? ""
+                }
+            } catch {
+                // The model store publishes the user-facing error.
+            }
         }
     }
 

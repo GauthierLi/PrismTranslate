@@ -2,6 +2,7 @@ import Foundation
 
 enum TranslationError: LocalizedError {
     case notConfigured
+    case ollamaNotConfigured
     case badURL
     case http(Int, String)
     case emptyResponse
@@ -9,7 +10,8 @@ enum TranslationError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .notConfigured: return "尚未配置 API Key 或接口地址，请在设置中填写。"
+        case .notConfigured: return "尚未配置 API Key、接口地址或模型，请在设置中填写。"
+        case .ollamaNotConfigured: return "请先启动 Ollama，并在设置中选择一个已安装的模型。"
         case .badURL: return "接口地址无效。"
         case .http(let code, let body):
             let snippet = body.prefix(300)
@@ -20,7 +22,7 @@ enum TranslationError: LocalizedError {
     }
 }
 
-/// Handles translation via either OpenAI-compatible or Anthropic-compatible chat APIs.
+/// Handles translation via OpenAI-compatible, Anthropic-compatible, or local Ollama chat APIs.
 struct Translator {
 
     let provider: ProviderKind
@@ -54,11 +56,23 @@ struct Translator {
     }
 
     func translate(_ text: String, source: String, target: String) async throws -> String {
-        guard !apiKey.isEmpty, !baseURL.isEmpty else { throw TranslationError.notConfigured }
         switch provider {
+        case .ollama:
+            guard !model.isEmpty else { throw TranslationError.ollamaNotConfigured }
+            return try await OllamaClient().translate(
+                text: text,
+                systemPrompt: systemPrompt(source: source, target: target),
+                model: model
+            )
         case .openai:
+            guard !apiKey.isEmpty, !baseURL.isEmpty, !model.isEmpty else {
+                throw TranslationError.notConfigured
+            }
             return try await translateOpenAI(text, source: source, target: target)
         case .anthropic:
+            guard !apiKey.isEmpty, !baseURL.isEmpty, !model.isEmpty else {
+                throw TranslationError.notConfigured
+            }
             return try await translateAnthropic(text, source: source, target: target)
         }
     }
