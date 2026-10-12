@@ -7,6 +7,7 @@ struct OllamaClientTests {
         try testChatResponseParser()
         try testChatRequestBuilder()
         testProviderConfiguration()
+        testProviderSwitchPreservesOpenAICompatibleConfiguration()
         print("Ollama contract tests passed")
     }
 
@@ -78,5 +79,63 @@ struct OllamaClientTests {
             baseURL: "https://example.com/v1",
             model: "model"
         ))
+    }
+
+    private static func testProviderSwitchPreservesOpenAICompatibleConfiguration() {
+        withPreservedUserDefaults([
+            "provider",
+            "baseURL",
+            "apiKey",
+            "model",
+            "openaiBaseURL",
+            "openaiApiKey",
+            "openaiModel",
+            "anthropicBaseURL",
+            "anthropicApiKey",
+            "anthropicModel",
+            "ollamaModel",
+        ]) {
+            let settings = AppSettings()
+            settings.provider = .openai
+            settings.baseURL = "https://oneapi.example.com/v1"
+            settings.apiKey = "openai-compatible-key"
+            settings.model = "gpt-5.6-luna"
+
+            settings.provider = .ollama
+            settings.applyProviderDefaults()
+            precondition(settings.model.isEmpty, "Ollama should not reuse the OpenAI model")
+
+            settings.provider = .openai
+            settings.applyProviderDefaults()
+
+            precondition(settings.baseURL == "https://oneapi.example.com/v1")
+            precondition(settings.apiKey == "openai-compatible-key")
+            precondition(settings.model == "gpt-5.6-luna")
+        }
+    }
+
+    private static func withPreservedUserDefaults(_ keys: [String], run: () -> Void) {
+        let defaults = UserDefaults.standard
+        var savedValues: [String: Any] = [:]
+        var hadValue: Set<String> = []
+
+        for key in keys {
+            if let value = defaults.object(forKey: key) {
+                savedValues[key] = value
+                hadValue.insert(key)
+            }
+            defaults.removeObject(forKey: key)
+        }
+
+        defer {
+            for key in keys {
+                defaults.removeObject(forKey: key)
+                if hadValue.contains(key), let value = savedValues[key] {
+                    defaults.set(value, forKey: key)
+                }
+            }
+        }
+
+        run()
     }
 }

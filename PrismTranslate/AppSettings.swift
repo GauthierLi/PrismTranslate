@@ -85,6 +85,13 @@ final class AppSettings: ObservableObject {
     @AppStorage("baseURL") var baseURL: String = ProviderKind.openai.defaultBaseURL
     @AppStorage("apiKey") var apiKey: String = ""
     @AppStorage("model") var model: String = ProviderKind.openai.defaultModel
+    @AppStorage("openaiBaseURL") private var openaiBaseURL: String = ""
+    @AppStorage("openaiApiKey") private var openaiApiKey: String = ""
+    @AppStorage("openaiModel") private var openaiModel: String = ""
+    @AppStorage("anthropicBaseURL") private var anthropicBaseURL: String = ""
+    @AppStorage("anthropicApiKey") private var anthropicApiKey: String = ""
+    @AppStorage("anthropicModel") private var anthropicModel: String = ""
+    @AppStorage("ollamaModel") private var ollamaModel: String = ""
     @AppStorage("sourceLanguage") var sourceLanguage: String = "auto"
     @AppStorage("targetLanguage") var targetLanguage: String = "zh-Hans"
 
@@ -113,15 +120,50 @@ final class AppSettings: ObservableObject {
     var provider: ProviderKind {
         get { ProviderKind(rawValue: providerRaw) ?? .openai }
         set {
+            let oldProvider = provider
+            guard oldProvider != newValue else { return }
+            saveCurrentConfiguration(for: oldProvider)
             providerRaw = newValue.rawValue
+            restoreConfiguration(for: newValue)
             objectWillChange.send()
         }
     }
 
-    /// Reset base URL + model to provider defaults (used when switching provider).
+    /// Restore the selected provider's saved configuration, or its defaults on first use.
     func applyProviderDefaults() {
-        baseURL = provider.defaultBaseURL
-        model = provider.defaultModel
+        restoreConfiguration(for: provider)
+    }
+
+    private func saveCurrentConfiguration(for provider: ProviderKind) {
+        switch provider {
+        case .openai:
+            openaiBaseURL = baseURL
+            openaiApiKey = apiKey
+            openaiModel = model
+        case .anthropic:
+            anthropicBaseURL = baseURL
+            anthropicApiKey = apiKey
+            anthropicModel = model
+        case .ollama:
+            ollamaModel = model
+        }
+    }
+
+    private func restoreConfiguration(for provider: ProviderKind) {
+        switch provider {
+        case .openai:
+            baseURL = openaiBaseURL.nonEmptyValue ?? ProviderKind.openai.defaultBaseURL
+            apiKey = openaiApiKey
+            model = openaiModel.nonEmptyValue ?? ProviderKind.openai.defaultModel
+        case .anthropic:
+            baseURL = anthropicBaseURL.nonEmptyValue ?? ProviderKind.anthropic.defaultBaseURL
+            apiKey = anthropicApiKey
+            model = anthropicModel.nonEmptyValue ?? ProviderKind.anthropic.defaultModel
+        case .ollama:
+            baseURL = ProviderKind.ollama.defaultBaseURL
+            apiKey = ""
+            model = ollamaModel
+        }
     }
 
     var isConfigured: Bool {
@@ -149,5 +191,12 @@ final class AppSettings: ObservableObject {
             return !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
                 !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
+    }
+}
+
+private extension String {
+    var nonEmptyValue: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : self
     }
 }
