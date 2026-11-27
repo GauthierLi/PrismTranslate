@@ -3,7 +3,10 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var ollamaModels: OllamaModelStore
+    var onScreenRecordingGuide: () -> Void
     var onProviderChange: () -> Void = {}
+    var onClipboardWatchChange: () -> Void = {}
+    var onModeChange: () -> Void = {}
     var onFloatingBallChange: () -> Void = {}
 
     @State private var testing = false
@@ -15,16 +18,17 @@ struct SettingsView: View {
                 section("功能模式") {
                     Picker("模式", selection: Binding(
                         get: { settings.appMode },
-                        set: { settings.appMode = $0 })
+                        set: { settings.appMode = $0; onModeChange() })
                     ) {
                         ForEach(AppMode.allCases) { mode in
                             Text(mode.label).tag(mode)
                         }
                     }
                     .pickerStyle(.segmented)
-                    Text(settings.appMode == .ocr
-                         ? "OCR：按 ⌘⇧T 或点悬浮球截图，识别文本（去掉换行）显示为字幕，可拖动选词后 ⌘C 复制。首次使用需在“系统设置 → 隐私与安全性 → 屏幕录制”授权。"
-                         : "翻译：按 ⌘⇧T 或开启自动监听，翻译剪贴板文本并显示字幕，字幕可拖动选词后 ⌘C 复制。")
+                    if settings.appMode != .translate {
+                        Button("授予录屏权限…", action: onScreenRecordingGuide)
+                    }
+                    Text(modeDescription)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -115,14 +119,26 @@ struct SettingsView: View {
 
                 section("字幕显示") {
                     Toggle("同时显示原文", isOn: $settings.showOriginal)
-                    Toggle("自动监听剪贴板变化", isOn: Binding(
+                    Text("适用于粘贴板翻译和 OCR翻译。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle("自动监听粘贴板变化", isOn: Binding(
                         get: { settings.autoWatchClipboard },
-                        set: { settings.autoWatchClipboard = $0 })
+                        set: { settings.autoWatchClipboard = $0; onClipboardWatchChange() })
                     )
                     Toggle("显示悬浮球", isOn: Binding(
                         get: { settings.showFloatingBall },
                         set: { settings.showFloatingBall = $0; onFloatingBallChange() })
                     )
+                    if settings.showFloatingBall {
+                        Picker("悬浮球皮肤", selection: Binding(
+                            get: { settings.ballSkin },
+                            set: { settings.ballSkin = $0; onFloatingBallChange() })
+                        ) {
+                            ForEach(BallSkin.allCases) { skin in
+                                Text(skin.label).tag(skin)
+                            }
+                        }
+                    }
                     HStack {
                         Text("字号")
                         Slider(value: $settings.overlayFontSize, in: 14...40, step: 1)
@@ -140,7 +156,7 @@ struct SettingsView: View {
                 }
 
                 section("快捷键") {
-                    Text("全局快捷键：⌘⇧T 翻译当前剪贴板内容")
+                    Text("全局快捷键：⌘⇧T 执行所选功能（\(settings.appMode.label)）")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -171,6 +187,17 @@ struct SettingsView: View {
             if settings.provider == .ollama {
                 refreshOllamaModels()
             }
+        }
+    }
+
+    private var modeDescription: String {
+        switch settings.appMode {
+        case .translate:
+            return "翻译：按 ⌘⇧T 或开启自动监听，翻译粘贴板文本并显示字幕。"
+        case .ocr:
+            return "OCR：按 ⌘⇧T 截图识别原文并显示字幕，可选词后 ⌘C 复制。首次使用需授予屏幕录制权限。"
+        case .ocrTranslate:
+            return "OCR翻译：按 ⌘⇧T 截图后翻译并显示字幕。长按悬浮球也可直接选择两种 OCR 任务。"
         }
     }
 

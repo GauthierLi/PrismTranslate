@@ -21,7 +21,7 @@ xcrun swiftc \
   -sdk "$SDK" \
   -target "$TARGET" \
   -O \
-  -framework AppKit -framework SwiftUI -framework Combine -framework Vision \
+  -framework AppKit -framework SwiftUI -framework Combine -framework Vision -framework ScreenCaptureKit \
   "$SRC_DIR"/*.swift \
   -o "$MACOS_DIR/$EXE_NAME"
 
