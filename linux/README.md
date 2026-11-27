@@ -20,7 +20,7 @@ prismtranslate
 ```bash
 sudo apt install python3-venv ca-certificates libgl1 libegl1 libfontconfig1 libdbus-1-3 \
   libgssapi-krb5-2 \
-  libxkbcommon-x11-0 libxi1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+  libxkbcommon-x11-0 libxi6 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
   libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-randr0 \
   libxcb-shape0 libxcb-xfixes0 tesseract-ocr tesseract-ocr-eng \
   tesseract-ocr-chi-sim fonts-noto-cjk xdg-desktop-portal

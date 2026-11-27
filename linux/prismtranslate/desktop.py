@@ -3,6 +3,7 @@
 import asyncio
 import ctypes
 import ctypes.util
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -16,6 +17,53 @@ from .core import UserError
 
 class CaptureCancelled(UserError):
     pass
+
+
+def show_on_all_workspaces(widget):
+    """Request EWMH all-desktop placement for our own X11 floating window."""
+    from PySide6.QtWidgets import QApplication
+
+    if (QApplication.platformName() != "xcb" or
+            os.environ.get("XDG_SESSION_TYPE") == "wayland"):
+        return
+    library = ctypes.util.find_library("X11")
+    if not library:
+        return
+    xlib = ctypes.CDLL(library)
+    xlib.XOpenDisplay.argtypes, xlib.XOpenDisplay.restype = [ctypes.c_char_p], ctypes.c_void_p
+    xlib.XDefaultRootWindow.argtypes, xlib.XDefaultRootWindow.restype = [ctypes.c_void_p], ctypes.c_ulong
+    xlib.XInternAtom.argtypes, xlib.XInternAtom.restype = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int], ctypes.c_ulong
+    xlib.XChangeProperty.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong,
+                                   ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+    xlib.XSendEvent.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_long, ctypes.c_void_p]
+    xlib.XCloseDisplay.argtypes = [ctypes.c_void_p]
+
+    class ClientMessage(ctypes.Structure):
+        _fields_ = [("type", ctypes.c_int), ("serial", ctypes.c_ulong),
+                    ("send_event", ctypes.c_int), ("display", ctypes.c_void_p),
+                    ("window", ctypes.c_ulong), ("message_type", ctypes.c_ulong),
+                    ("format", ctypes.c_int), ("data", ctypes.c_long * 5)]
+
+    display = xlib.XOpenDisplay(None)
+    if not display:
+        return
+    try:
+        window = int(widget.winId())
+        atom = xlib.XInternAtom(display, b"_NET_WM_DESKTOP", 0)
+        cardinal = xlib.XInternAtom(display, b"CARDINAL", 0)
+        desktop = (ctypes.c_ulong * 1)(0xffffffff)
+        # Initial property is consumed when the window is first mapped.
+        xlib.XChangeProperty(display, window, atom, cardinal, 32, 0, desktop, 1)
+        storage = (ctypes.c_long * 24)()
+        event = ctypes.cast(storage, ctypes.POINTER(ClientMessage)).contents
+        event.type, event.send_event, event.display = 33, 1, display
+        event.window, event.message_type, event.format = window, atom, 32
+        event.data[0], event.data[1] = 0xffffffff, 1
+        # Also request the change for windows already managed by the WM.
+        xlib.XSendEvent(display, xlib.XDefaultRootWindow(display), 0,
+                       (1 << 19) | (1 << 20), storage)
+    finally:
+        xlib.XCloseDisplay(display)
 
 
 def system_reduce_motion():
@@ -205,7 +253,7 @@ class X11PointerMonitor(QObject):
             raise UserError("X11 鼠标监听不可用。")
         xi_library = ctypes.util.find_library("Xi")
         if not xi_library:
-            raise UserError("请安装 libxi1 以支持字幕外部点击关闭。")
+            raise UserError("请安装 libxi6 以支持字幕外部点击关闭。")
         self.xlib = ctypes.CDLL(library)
         self.xi = ctypes.CDLL(xi_library)
         self.xlib.XOpenDisplay.argtypes = [ctypes.c_char_p]

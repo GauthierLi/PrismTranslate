@@ -185,6 +185,16 @@ class ControllerTests(unittest.TestCase):
                     until(lambda: not controller.busy)
                     portal.assert_called_once()
                     self.assertEqual(controller.subtitle.result.toPlainText(), "screen text")
+                selector = RegionSelector(APP.primaryScreen(), APP.primaryScreen().grabWindow(0))
+                controller.selectors = [selector]
+                controller.capture_restore = [controller.window]
+                controller.window.hide()
+                controller.selection_active = True
+                controller.busy = True
+                controller.application_state_changed(Qt.ApplicationState.ApplicationInactive)
+                self.assertFalse(controller.selectors)
+                self.assertFalse(controller.busy)
+                self.assertTrue(controller.window.isVisible())
                 controller.window.watch.setChecked(True)
                 controller.save()
                 count = len(test_core.Handler.records)
@@ -196,6 +206,32 @@ class ControllerTests(unittest.TestCase):
                 APP.processEvents()
                 self.assertEqual(len(test_core.Handler.records), count + 1,
                                  "copying a translation must not start a translation loop")
+                controller.window.watch.setChecked(False)
+                controller.save()
+                count = len(test_core.Handler.records)
+                controller.translate_text("这是一段完整的中文句子，用来验证同语言文本不会发起网络翻译请求。")
+                until(lambda: not controller.busy)
+                self.assertEqual(len(test_core.Handler.records), count)
+                self.assertFalse(controller.subtitle.isVisible())
+                self.assertEqual(controller.window.status.text(), "无需翻译")
+                # Closing immediately after disabling the ball must not lose
+                # the last entry point while the save timer is still pending.
+                controller.window.ball.setChecked(False)
+                self.assertFalse(controller.settings.show_ball)
+                controller.window.close()
+                self.assertTrue(controller.window.isVisible())
+                controller.window.ball.setChecked(True)
+                self.assertTrue(controller.ball.isVisible())
+                controller.capturing = True
+                controller.ball.hide()
+                controller.settings_changed()
+                controller.save()
+                self.assertFalse(controller.ball.isVisible())
+                controller.capture_restore = [controller.ball]
+                controller.window.ball.setChecked(False)
+                controller.restore_capture_windows()
+                self.assertFalse(controller.ball.isVisible())
+                self.assertFalse(controller.capturing)
             finally:
                 controller.settings.watch_clipboard = False
                 controller.clipboard_timer.stop()

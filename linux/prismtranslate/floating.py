@@ -9,6 +9,7 @@ from PySide6.QtGui import QColor, QCursor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 from .pet import head
+from .desktop import show_on_all_workspaces
 from .views import DraggableWindow, bounded_position
 
 
@@ -58,6 +59,7 @@ class QuickRing(QWidget):
         self.move(center - QPoint(84, 84))
         self.selected = None
         self.shown_at = time.monotonic()
+        show_on_all_workspaces(self)
         self.show()
         self.raise_()
         self.update_pointer(press)
@@ -94,6 +96,7 @@ class QuickRing(QWidget):
             x = center.x() - self.bubble.width() // 2
         x = max(self.available.left(), min(x, self.available.right() - self.bubble.width()))
         self.bubble.move(x, y)
+        show_on_all_workspaces(self.bubble)
         self.bubble.show()
 
     def cancel(self):

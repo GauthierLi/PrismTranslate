@@ -11,7 +11,7 @@ import sys
 import tempfile
 import uuid
 
-from PySide6.QtCore import QObject, QPoint, QLockFile, QRunnable, QThreadPool, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, QPoint, QLockFile, QRunnable, QThreadPool, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QActionGroup, QIcon, QKeySequence, QShortcut
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QMessageBox, QSystemTrayIcon
@@ -57,7 +57,9 @@ class Controller(QObject):
         self.busy = False
         self.quitting = False
         self.selectors = []
+        self.selection_active = False
         self.capture_restore = []
+        self.capturing = False
         self.icon = QIcon(str(Path(__file__).parent / "logo.png"))
         if self.icon.isNull():
             self.icon = QIcon(str(Path(__file__).resolve().parents[2] / "Resources/logo.png"))
@@ -110,7 +112,7 @@ class Controller(QObject):
         self.save_timer.setSingleShot(True)
         self.save_timer.setInterval(300)
         self.save_timer.timeout.connect(self.save)
-        self.window.changed.connect(self.save_timer.start)
+        self.window.changed.connect(self.settings_changed)
         self.ball.moved.connect(self.save_positions)
         self.subtitle.moved.connect(self.save_positions)
         QApplication.clipboard().dataChanged.connect(self.clipboard_changed)
@@ -143,6 +145,33 @@ class Controller(QObject):
         self.window.show()
         if settings.provider == "ollama":
             self.refresh_models()
+        self.app.applicationStateChanged.connect(self.application_state_changed)
+        self.app.screenAdded.connect(self.screen_added)
+        self.app.screenRemoved.connect(self.capture_screen_changed)
+        self.app.primaryScreenChanged.connect(self.capture_screen_changed)
+        for screen in self.app.screens():
+            self.watch_screen(screen)
+
+    def watch_screen(self, screen):
+        screen.geometryChanged.connect(self.capture_screen_changed)
+        screen.logicalDotsPerInchChanged.connect(self.capture_screen_changed)
+        screen.physicalDotsPerInchChanged.connect(self.capture_screen_changed)
+
+    def screen_added(self, screen):
+        self.watch_screen(screen)
+        self.capture_screen_changed()
+
+    def capture_screen_changed(self, *_):
+        if self.selectors and not self.quitting:
+            self.cancel_capture()
+
+    def application_state_changed(self, state):
+        if not self.selectors or self.quitting:
+            return
+        if state == Qt.ApplicationState.ApplicationActive:
+            self.selection_active = True
+        elif self.selection_active:
+            self.cancel_capture()
 
     def add_choices(self, title, choices, current, callback):
         menu = self.menu.addMenu(title)
@@ -211,6 +240,15 @@ class Controller(QObject):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             self.show_settings()
 
+    def settings_changed(self):
+        self.window.apply()
+        if not self.capturing:
+            self.ball.setVisible(self.settings.show_ball)
+        self.ball.update()
+        if not self.busy:
+            self.window.status.setText("正在保存…")
+        self.save_timer.start()
+
     def save(self):
         self.save_timer.stop()
         self.window.apply()
@@ -219,9 +257,11 @@ class Controller(QObject):
         except UserError as exc:
             self.show_error(exc)
             return False
-        self.ball.setVisible(self.settings.show_ball)
+        if not self.capturing:
+            self.ball.setVisible(self.settings.show_ball)
         self.ball.update()
-        self.window.status.setText("设置已保存")
+        if not self.busy:
+            self.window.status.setText("设置已保存")
         return True
 
     def set_busy(self, busy, status="就绪"):
@@ -326,6 +366,7 @@ class Controller(QObject):
             return
         settings = deepcopy(self.settings)
         self.set_busy(True, "请选择截图区域 · Esc 取消")
+        self.capturing = True
         self.capture_restore = [widget for widget in (self.window, self.ball, self.subtitle) if widget.isVisible()]
         for widget in self.capture_restore:
             if widget is self.subtitle and self.subtitle.timer.isActive():
@@ -357,6 +398,9 @@ class Controller(QObject):
                 selector.showFullScreen()
                 selector.raise_()
                 selector.activateWindow()
+            # Ignore deactivation caused by hiding our own windows before the
+            # selector gains focus; later loss of focus cancels selection.
+            self.selection_active = self.app.applicationState() == Qt.ApplicationState.ApplicationActive
         except UserError as exc:
             self.capture_completed(None, exc)
 
@@ -366,6 +410,7 @@ class Controller(QObject):
             selector.update()
 
     def close_selectors(self):
+        self.selection_active = False
         for selector in self.selectors:
             selector.close()
             selector.deleteLater()
@@ -373,8 +418,15 @@ class Controller(QObject):
 
     def restore_capture_windows(self):
         self.close_selectors()
+        self.capturing = False
         for widget in self.capture_restore:
+            if widget is self.ball and not self.settings.show_ball:
+                continue
+            previous = widget.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+            if self.app.applicationState() != Qt.ApplicationState.ApplicationActive:
+                widget.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
             widget.show()
+            widget.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, previous)
             if widget is self.subtitle and not self.subtitle.pinned and not self.subtitle.underMouse():
                 self.subtitle.timer.start(self.subtitle.remaining)
         self.capture_restore.clear()
@@ -478,6 +530,8 @@ class Controller(QObject):
             self.app.quit()
 
     def cleanup(self):
+        self.close_selectors()
+        self.capturing = False
         self.ball.timer.stop()
         self.ball.cancel_gesture()
         self.ball.ring.bubble.close()

@@ -13,7 +13,8 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 
-from prismtranslate.views import RegionSelector
+from prismtranslate.views import RegionSelector, Subtitle
+from prismtranslate.core import Settings
 
 app = QApplication([])
 app.setQuitOnLastWindowClosed(False)
@@ -54,6 +55,11 @@ try:
                        check=True, stdout=subprocess.DEVNULL)
     panel.show()
     until(lambda: screen.availableGeometry().top() == geometry.top() + 27)
+    floating = Subtitle(Settings())
+    floating.show_result("", "All-workspace subtitle")
+    until(lambda: "4294967295" in subprocess.check_output(
+        ["xprop", "-id", str(int(floating.winId())), "_NET_WM_DESKTOP"], text=True))
+    floating.hide()
     image = QPixmap(geometry.size())
     image.fill(QColor("white"))
     painter = QPainter(image)
@@ -87,7 +93,7 @@ try:
     print(json.dumps({"wm": "Openbox/EWMH", "top_panel": 27,
                       "ordinary_geometry": [constrained.x(), constrained.y(), constrained.width(), constrained.height()],
                       "fullscreen_geometry": [selector.x(), selector.y(), selector.width(), selector.height()],
-                      "pixel_comparisons": 6, "result": "passed"}))
+                      "pixel_comparisons": 6, "all_workspace_desktop": "0xffffffff", "result": "passed"}))
     verification = Path("/verification")
     if verification.is_dir():
         selector.grab().save(str(verification / "top-panel-fullscreen.png"))

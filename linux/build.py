@@ -17,7 +17,7 @@ VERSION = "0.2.0"
 ARCHES = {"amd64": "manylinux_2_28_x86_64", "arm64": "manylinux_2_31_aarch64"}
 DEPENDENCIES = (
     "python3 (>= 3.8), python3 (<< 3.13), python3-venv, util-linux, ca-certificates, "
-    "libgl1, libegl1, libfontconfig1, libdbus-1-3, libgssapi-krb5-2, libxkbcommon-x11-0, libxi1, "
+    "libgl1, libegl1, libfontconfig1, libdbus-1-3, libgssapi-krb5-2, libxkbcommon-x11-0, libxi6, "
     "libxcb-cursor0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, "
     "libxcb-render-util0, libxcb-xinerama0, libxcb-randr0, libxcb-shape0, "
     "libxcb-xfixes0, tesseract-ocr, tesseract-ocr-eng, tesseract-ocr-chi-sim"

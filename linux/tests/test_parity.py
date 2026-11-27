@@ -105,10 +105,20 @@ class ParityTests(unittest.TestCase):
                     ("这是一个完整的中文句子，用来验证离线语言识别功能。", "zh-Hans"),
                     ("這是一個完整的中文句子，用來驗證離線語言識別功能。", "zh-Hant"),
                     ("これは日本語で書かれた文章です。翻訳の機能を確認しています。", "ja"),
-                    ("Bonjour, ceci est une phrase française qui explique la traduction.", "fr")]
+                    ("Bonjour, ceci est une phrase française qui explique la traduction.", "fr"),
+                    ("이것은 한국어로 작성된 문장입니다. 번역 기능이 정상적으로 작동하는지 확인하고 있습니다.", "ko"),
+                    ("Dies ist ein vollständiger deutscher Satz über die Übersetzung wissenschaftlicher Texte.", "de"),
+                    ("Esta es una frase completa en español sobre la traducción de artículos científicos.", "es"),
+                    ("Это полное предложение на русском языке для проверки перевода научных текстов.", "ru"),
+                    ("Esta é uma frase completa em português para verificar a tradução de documentos científicos.", "pt"),
+                    ("Questa è una frase completa in italiano per verificare la traduzione di documenti scientifici.", "it"),
+                    ("هذه جملة كاملة باللغة العربية لاختبار ترجمة النصوص العلمية وقراءة المستندات.", "ar"),
+                    ("นี่คือประโยคภาษาไทยสำหรับทดสอบการแปลข้อความและการอ่านเอกสารทางวิทยาศาสตร์", "th"),
+                    ("Đây là một câu hoàn chỉnh bằng tiếng Việt để kiểm tra chức năng dịch tài liệu khoa học.", "vi")]
         for text, language in examples:
             self.assertTrue(is_already(text, language), (text, language))
-            self.assertFalse(is_already(text, "de"), (text, "de"))
+            other = "en" if language == "de" else "de"
+            self.assertFalse(is_already(text, other), (text, other))
         for text in ("1", "1234", "!", "A"):
             self.assertFalse(is_already(text, "en"))
 

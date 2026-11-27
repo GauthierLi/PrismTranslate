@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 )
 
 from .core import LANGUAGES, MODES, PROVIDERS
+from .desktop import show_on_all_workspaces
 from .pet import SKINS, capture_pet
 
 STYLE = """
@@ -364,6 +365,10 @@ class DraggableWindow(QWidget):
         self.dragged = False
         self.pinned = False
 
+    def showEvent(self, event):
+        show_on_all_workspaces(self)
+        super().showEvent(event)
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and not self.pinned:
             self.drag_start = event.globalPosition().toPoint() - self.pos()
@@ -575,6 +580,7 @@ class RegionSelector(QWidget):
         self.setGeometry(self.screen_geometry)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setWindowTitle("拖动选择文字区域 · Esc 取消")
+        show_on_all_workspaces(self)
 
     def paintEvent(self, event):
         painter = QPainter(self)
