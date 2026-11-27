@@ -319,6 +319,10 @@ class FloatingBall(DraggableWindow):
         if event.button() != Qt.MouseButton.LeftButton:
             return
         phase = self.phase
+        if phase == "selecting":
+            # A timer may already have polled the cursor after the release.
+            # Commit at the event's position, including dead zones/busy gates.
+            self.ring.update_pointer(event.globalPosition().toPoint())
         selected = self.ring.selected
         self.cancel_gesture()
         if phase == "selecting":

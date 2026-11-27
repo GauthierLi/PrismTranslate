@@ -159,7 +159,10 @@ with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {
                     until(ball.ring.bubble.isVisible)
                     until(lambda: mapped_at(ball.ring.bubble, ball.ring.bubble.pos()))
                     transient_properties.append(assert_transient_to_ball(ball.ring.bubble, ball))
-                pointer("mouseup", 1)
+                # Queue native release then move away before Qt processes it,
+                # matching the host's release-and-park gesture.
+                parked = geometry.topLeft() + QPoint(160, 200)
+                pointer("mouseup", 1, "mousemove", parked.x(), parked.y())
                 until(lambda: bool(controller.selectors))
                 selector = controller.selectors[0]
                 until(lambda: not selector.screenshot.isNull())
@@ -261,6 +264,7 @@ with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {
                           "exposed_bottom_dock": 90, "ring_entries": 4,
                           "preview_and_crop_comparisons": comparisons,
                           "existing_entries": ["IPC", "menu", "hotkey"],
+                          "release_then_park": "passed",
                           "native_transient_properties": transient_properties,
                           "cancel_before_freeze": "passed", "busy_guard": "passed",
                           "no_compositor_fallback": "passed",

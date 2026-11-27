@@ -10,8 +10,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QRect, Qt
-from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QRect, Qt
+from PySide6.QtGui import QColor, QIcon, QImage, QMouseEvent, QPainter, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QPushButton
@@ -256,6 +256,81 @@ class ParityTests(unittest.TestCase):
             QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.assertFalse(isValid(ring))
         self.assertFalse(isValid(label))
+
+    def test_queued_ring_release_uses_event_position_after_cursor_poll(self):
+        ball = FloatingBall(Settings(reduce_motion=True), QIcon())
+        ball.move(300, 300)
+        ball.show()
+        APP.processEvents()
+        actions = []
+        ball.quick_action.connect(actions.append)
+        try:
+            offsets = {"ocr": QPoint(-40, -40), "ocr-translate": QPoint(40, -40),
+                       "watch": QPoint(0, 56)}
+            for action, offset in offsets.items():
+                for polled_offset in (QPoint(300, 0), QPoint(), QPoint(-40, -40)):
+                    with self.subTest(action=action, polled_offset=polled_offset):
+                        QTest.mousePress(ball, Qt.MouseButton.LeftButton, pos=QPoint(36, 39))
+                        ball.begin_ring()
+                        center = ball.ring.pos() + QPoint(84, 84)
+                        release = center + offset
+                        ball.ring.update_pointer(release)
+                        ball.ring.reveal_label()
+                        self.assertTrue(ball.ring.bubble.isVisible())
+                        # The release has already happened at the selected
+                        # sector, but a timer polls the pointer after it moved.
+                        event = QMouseEvent(QEvent.Type.MouseButtonRelease,
+                                            QPointF(ball.mapFromGlobal(release)), QPointF(release),
+                                            Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton,
+                                            Qt.KeyboardModifier.NoModifier)
+                        APP.postEvent(ball, event)
+                        with patch("prismtranslate.floating.QCursor.pos",
+                                   return_value=center + polled_offset):
+                            ball.tick()
+                        before = len(actions)
+                        QCoreApplication.sendPostedEvents(ball, QEvent.Type.MouseButtonRelease)
+                        self.assertEqual(actions[before:], [action])
+                        self.assertEqual(ball.phase, "idle")
+                        self.assertFalse(ball.ring.isVisible())
+                        self.assertFalse(ball.ring.bubble.isVisible())
+                        self.assertFalse(ball.ring.label_timer.isActive())
+        finally:
+            ball.hide()
+            ball.deleteLater()
+
+    def test_ring_release_rechecks_dead_zone_sector_and_busy_state(self):
+        ball = FloatingBall(Settings(reduce_motion=True), QIcon())
+        ball.move(300, 300)
+        ball.show()
+        APP.processEvents()
+        actions = []
+        ball.quick_action.connect(actions.append)
+        try:
+            cases = [(QPoint(), False, None),
+                     (QPoint(300, 0), False, None),
+                     (QPoint(-40, -40), True, None),
+                     (QPoint(0, 56), True, "watch"),
+                     (QPoint(40, -40), False, "ocr-translate"),
+                     (QPoint(0, -56), False, "ocr")]
+            for offset, busy, expected in cases:
+                with self.subTest(offset=offset, busy=busy):
+                    ball.busy = False
+                    QTest.mousePress(ball, Qt.MouseButton.LeftButton, pos=QPoint(36, 39))
+                    ball.begin_ring()
+                    center = ball.ring.pos() + QPoint(84, 84)
+                    ball.ring.update_pointer(center + QPoint(-40, -40))
+                    ball.busy = busy
+                    release = center + offset
+                    before = len(actions)
+                    # No final move/timer event: releasing in another sector,
+                    # a dead zone, or after becoming busy must be authoritative.
+                    QTest.mouseRelease(ball, Qt.MouseButton.LeftButton,
+                                       pos=ball.mapFromGlobal(release))
+                    self.assertEqual(actions[before:], [expected] if expected else [])
+                    self.assertEqual(ball.phase, "idle")
+        finally:
+            ball.hide()
+            ball.deleteLater()
 
     def test_subtitle_center_anchor_selection_loading_and_outside_click(self):
         settings = Settings(overlay_center=[400, 300])

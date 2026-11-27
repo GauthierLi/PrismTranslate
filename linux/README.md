@@ -95,7 +95,9 @@ PYTHONPATH=linux QT_QPA_PLATFORM=offscreen .venv/bin/python -m prismtranslate --
 
 `tests/test_core.py` 使用真实本机 HTTP 服务检查三种协议、鉴权、错误和模型发现，不调用付费接口。桌面测试覆盖窗口、异步翻译、OCR、顶栏偏移后的预览与裁剪像素、混合 DPI 合成、皮肤、真实长按 / 拖动 / 取消、语言判断和长路径单实例进程，并检查环和标签不会被球裁切、隐藏/销毁球会清理它们。X11 下还检查真实快捷键。`wm_fixture.py` 使用 Openbox 与保留 27px 的顶栏验证真全屏；`ring_capture_fixture.py` 使用 Openbox、xcompmgr 和底部自动隐藏 Dock，验证长按两种 OCR 入口在全屏激活后冻结画面、正反拖选的预览与裁剪、取消恢复，以及 IPC / 菜单 / 快捷键入口；同时用 `xprop` 检查环与延迟标签的 `WM_TRANSIENT_FOR` 指向球、无 attention 标记，显示时焦点仍在球。两者均不是 GNOME 实机结果。
 
-环和标签保持独立置顶 `Tool`，Qt 父窗口均为悬浮球，使 X11 的 transient 关系指向球。5080 的诊断与独立探针确认：无父窗口的环映射时被 Mutter 标记为 demands-attention，Ubuntu Dock 因应用图标 urgent 弹出；父窗口为球的探针没有触发。这项应用修复仍须以正式产物在 GNOME 验收，不能用 Openbox 的合成 Dock 代替。诊断依据和复测入口见 [DOCK_DIAGNOSTICS.md](tests/DOCK_DIAGNOSTICS.md)。
+环和标签保持独立置顶 `Tool`，Qt 父窗口均为悬浮球，使 X11 的 transient 关系指向球。2026-11-28，5080 的 Ubuntu 22.04.5 / GNOME 42.9 / X11 实测确认 `8139e97` 正式产物的环和标签不再触发 demands-attention，全部截图入口与死区对照的 Dock 全程为 0 行；证据来自截图及 X11 属性，Shell.Eval 内部状态不可用。Openbox 的合成 Dock 不能代替该实机结果。诊断依据和复测入口见 [DOCK_DIAGNOSTICS.md](tests/DOCK_DIAGNOSTICS.md)。
+
+环形动作在松手时使用鼠标事件的全局坐标重新计算分区，避免计时器先读到已移走的指针，造成动作丢失或选错分区。回归测试将松手事件排入队列，再执行一次不同指针位置的 `tick()`，覆盖三种动作、标签清理、死区、越界、忙时状态和接缝迟滞。5080 曾出现一次 OCR翻译松手后没有选择器，实机日志不能确定该次失败的事件顺序；此项修正仍需正式产物实机复测。
 
 三版本容器验证：
 
