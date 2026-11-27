@@ -22,7 +22,20 @@ for source in "$ROOT"/PrismTranslate/*.swift; do
 done
 xcrun swiftc -parse-as-library -target arm64-apple-macos13.0 \
   -framework AppKit -framework SwiftUI -framework Combine -framework Vision -framework ScreenCaptureKit \
-  "${SOURCES[@]}" "$ROOT/Tests/BallInteractionTests.swift" \
+  "${SOURCES[@]}" "$ROOT/Tests/BallInteractionTests.swift" "$ROOT/Tests/BallInactiveApplicationTests.swift" \
   -o "$APP/Contents/MacOS/BallTests"
+
+PEER="$TEST_DIR/ForegroundPeer.app"
+mkdir -p "$PEER/Contents/MacOS"
+cat > "$PEER/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.prismtranslate.ball-tests.foreground-peer</string>
+<key>CFBundleExecutable</key><string>ForegroundPeer</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+</dict></plist>
+PLIST
+cp "$APP/Contents/MacOS/BallTests" "$PEER/Contents/MacOS/ForegroundPeer"
 
 "$APP/Contents/MacOS/BallTests" "${1:-$TEST_DIR/evidence}"

@@ -268,8 +268,10 @@ final class BallSelectionController {
         let frame = CGRect(origin: .zero, size: BallSelectionGeometry.canvasSize)
         let panel = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel],
                             backing: .buffered, defer: false)
-        panel.level = .statusBar
+        // AppKit resets level to .floating when isFloatingPanel changes.
+        // Set the shared overlay level last, as the floating ball does.
         panel.isFloatingPanel = true
+        panel.level = .statusBar
         panel.hidesOnDeactivate = false
         panel.ignoresMouseEvents = true
         panel.isOpaque = false
@@ -304,8 +306,8 @@ final class BallSelectionController {
         if let bubblePanel { return bubblePanel }
         let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
                             backing: .buffered, defer: false)
-        panel.level = .statusBar
         panel.isFloatingPanel = true
+        panel.level = .statusBar
         panel.hidesOnDeactivate = false
         panel.ignoresMouseEvents = true
         panel.isOpaque = false
