@@ -33,11 +33,11 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-/// Primary function of the app: translate clipboard/text, or OCR from a
-/// screenshot selection.
+/// Action assigned to ⌘⇧T. Menus and the ring always expose both OCR tasks.
 enum AppMode: String, CaseIterable, Identifiable, Codable {
     case translate
     case ocr
+    case ocrTranslate
 
     var id: String { rawValue }
 
@@ -45,6 +45,28 @@ enum AppMode: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .translate: return "翻译"
         case .ocr: return "OCR 识别"
+        case .ocrTranslate: return "OCR翻译"
+        }
+    }
+}
+
+/// Appearance of the floating ball: the classic prism ball or a small pet.
+enum BallSkin: String, CaseIterable, Identifiable, Codable {
+    case classic
+    case cat
+    case shiba
+    case panda
+    case chick
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .classic: return "经典棱镜"
+        case .cat: return "橘猫"
+        case .shiba: return "柴犬"
+        case .panda: return "熊猫"
+        case .chick: return "小黄鸡"
         }
     }
 }
@@ -96,15 +118,28 @@ final class AppSettings: ObservableObject {
     @AppStorage("targetLanguage") var targetLanguage: String = "zh-Hans"
 
     // Overlay behavior
-    @AppStorage("autoWatchClipboard") var autoWatchClipboard: Bool = false
+    @AppStorage("autoWatchClipboard") var autoWatchClipboard: Bool = false {
+        didSet { objectWillChange.send() }
+    }
     @AppStorage("overlaySeconds") var overlaySeconds: Double = 8.0
     @AppStorage("overlayFontSize") var overlayFontSize: Double = 22.0
     @AppStorage("showOriginal") var showOriginal: Bool = true
 
     // Floating ball
     @AppStorage("showFloatingBall") var showFloatingBall: Bool = true
+    @AppStorage("floatingBallSkin") var ballSkinRaw: String = BallSkin.classic.rawValue {
+        didSet { objectWillChange.send() }
+    }
 
-    // Primary mode (translate / ocr)
+    var ballSkin: BallSkin {
+        get { BallSkin(rawValue: ballSkinRaw) ?? .classic }
+        set {
+            ballSkinRaw = newValue.rawValue
+            objectWillChange.send()
+        }
+    }
+
+    // Global hotkey action (translate / ocr / ocrTranslate)
     @AppStorage("appMode") var appModeRaw: String = AppMode.translate.rawValue {
         didSet { objectWillChange.send() }
     }

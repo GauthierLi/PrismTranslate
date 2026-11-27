@@ -16,6 +16,8 @@ final class OverlayController {
     private var window: NSPanel?
     private var hostingView: NSHostingView<OverlayView>?
     private var moveObserver: NSObjectProtocol?
+    private var localMouseMonitor: Any?
+    private var globalMouseMonitor: Any?
     private let model = OverlayModel()
     private var hideTask: Task<Void, Never>?
     private var autoHideSeconds: Double = 0
@@ -74,7 +76,37 @@ final class OverlayController {
     func hide() {
         hideTask?.cancel()
         hideTask = nil
+        removeOutsideClickMonitors()
         window?.orderOut(nil)
+    }
+
+    private func observeOutsideClicks() {
+        let clickTypes: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        if localMouseMonitor == nil {
+            localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: clickTypes) { [weak self] event in
+                guard let self, let panel = self.window, panel.isVisible,
+                      !self.model.isPinned, event.window !== panel else { return event }
+                self.hide()
+                return event
+            }
+        }
+        if globalMouseMonitor == nil {
+            globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: clickTypes) { [weak self] _ in
+                guard let self, self.window?.isVisible == true, !self.model.isPinned else { return }
+                self.hide()
+            }
+        }
+    }
+
+    private func removeOutsideClickMonitors() {
+        if let localMouseMonitor {
+            NSEvent.removeMonitor(localMouseMonitor)
+            self.localMouseMonitor = nil
+        }
+        if let globalMouseMonitor {
+            NSEvent.removeMonitor(globalMouseMonitor)
+            self.globalMouseMonitor = nil
+        }
     }
 
     private func present(autoHide seconds: Double) {
@@ -85,6 +117,7 @@ final class OverlayController {
         panel.isMovableByWindowBackground = !model.isPinned
         layout(panel)
         panel.orderFrontRegardless()
+        observeOutsideClicks()
         // Selectable subtitles need to be the key window so drag-select and
         // ⌘C copy are routed to the SwiftUI text; loading/error do not.
         if model.selectable {
@@ -102,7 +135,7 @@ final class OverlayController {
         hideTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             if Task.isCancelled { return }
-            self?.window?.orderOut(nil)
+            self?.hide()
         }
     }
 
@@ -218,6 +251,8 @@ final class OverlayController {
     }
 
     deinit {
+        if let localMouseMonitor { NSEvent.removeMonitor(localMouseMonitor) }
+        if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor) }
         if let moveObserver { NotificationCenter.default.removeObserver(moveObserver) }
     }
 }
