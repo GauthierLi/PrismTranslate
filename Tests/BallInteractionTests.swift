@@ -25,6 +25,10 @@ private final class FixtureProtocol: URLProtocol {
 @main
 struct BallInteractionTests {
     @MainActor static func main() {
+        if CommandLine.arguments.count > 2 && CommandLine.arguments[1] == "--foreground-peer" {
+            BallInactiveApplicationTests.runForegroundPeer(statusURL: URL(fileURLWithPath: CommandLine.arguments[2]))
+            return
+        }
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         Task { @MainActor in
@@ -103,6 +107,36 @@ struct BallInteractionTests {
             overlay.hide()
             delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
         }
+
+        var expectedCaptures = captureCount
+        var expectedWatching = false
+        try await BallInactiveApplicationTests.run(ball: ball, output: outputURL) { action in
+            switch action {
+            case .ocr:
+                expectedCaptures += 1
+                try check(captureCount == expectedCaptures && !capturedWhileRingVisible,
+                          "Inactive OCR executes exactly once after ring hides")
+                try check(overlayModel.translated == "Hello, world!" && overlayModel.original == nil,
+                          "Inactive OCR shows recognized original")
+            case .ocrTranslate:
+                expectedCaptures += 1
+                try check(captureCount == expectedCaptures && !capturedWhileRingVisible,
+                          "Inactive OCR translation executes exactly once after ring hides")
+                try check(overlayModel.translated == "你好，世界！" && overlayModel.original == "Hello, world!",
+                          "Inactive OCR translation shows the translated fixture")
+            case .clipboardWatch:
+                expectedWatching.toggle()
+                let enabled = delegate.settings.autoWatchClipboard
+                let timer: Timer? = member(delegate, "clipTimer")
+                try check(enabled == expectedWatching && (timer != nil) == enabled && ball.watchingClipboard == enabled
+                          && view.wearingHeadphones == enabled, "Inactive toggle updates polling and headphones")
+            }
+            try check(!delegate.isOCRInProgress, "Inactive action releases OCR lock")
+            overlay.hide()
+        }
+        try check(captureCount == 8 && !delegate.settings.autoWatchClipboard,
+                  "All foreign-app scenarios execute OCR, OCR translation and toggle clipboard watching")
+        captureCount = 0
 
         // Initial off/on accessory atlas: same production drawing, all skins.
         try renderSkins(to: outputURL)
