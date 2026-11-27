@@ -27,6 +27,23 @@ panel.setGeometry(geometry.x(), geometry.y(), geometry.width(), 27)
 panel.setStyleSheet("background: #222733;")
 
 
+def managed(widget):
+    identifier = hex(int(widget.winId()))
+    clients = subprocess.check_output(["xprop", "-root", "_NET_CLIENT_LIST"], text=True)
+    return identifier in clients.partition(":")[2].replace(",", "").split() and "IsViewable" in subprocess.check_output(
+        ["xwininfo", "-id", str(int(widget.winId()))], text=True)
+
+
+def fullscreen(widget):
+    # During an EWMH transition Qt can retain the requested QWidget y while
+    # X11 has moved the native window. Capture uses the real global origin.
+    state = subprocess.check_output(["xprop", "-id", str(int(widget.winId())),
+                                     "_NET_WM_STATE"], text=True)
+    return ("_NET_WM_STATE_FULLSCREEN" in state and
+            widget.mapToGlobal(QPoint(0, 0)) == geometry.topLeft() and
+            widget.size() == geometry.size())
+
+
 def until(condition):
     deadline = time.monotonic() + 5
     while not condition() and time.monotonic() < deadline:
@@ -40,6 +57,11 @@ def until(condition):
         print(subprocess.check_output(["xwininfo", "-id", str(int(panel.winId()))], text=True), flush=True)
         print(subprocess.check_output(["xprop", "-id", str(int(panel.winId())), "_NET_WM_WINDOW_TYPE",
                                        "_NET_WM_STRUT", "_NET_WM_STRUT_PARTIAL"], text=True), flush=True)
+        if "selector" in globals():
+            print("Qt selector geometry:", selector.geometry(), flush=True)
+            print(subprocess.check_output(["xwininfo", "-id", str(int(selector.winId()))], text=True), flush=True)
+            print(subprocess.check_output(["xprop", "-id", str(int(selector.winId())),
+                                           "_NET_WM_STATE", "_NET_WM_DESKTOP"], text=True), flush=True)
         raise AssertionError("WM fixture timed out")
 
 
@@ -75,10 +97,17 @@ try:
     # reserved workarea, then verify fullscreen escapes that area completely.
     selector.setGeometry(screen.availableGeometry())
     selector.show()
-    until(lambda: selector.geometry().top() == geometry.top() + 27)
+    # Qt exposes the requested geometry before MapRequest is handled. Wait for
+    # native management before requesting an EWMH fullscreen transition.
+    until(lambda: managed(selector) and selector.geometry().top() == geometry.top() + 27)
     constrained = selector.geometry()
     selector.showFullScreen()
-    until(lambda: selector.geometry() == geometry)
+    until(lambda: fullscreen(selector))
+    selector.close()
+    # Production opens directly in fullscreen; verify that path as well.
+    selector = RegionSelector(screen, image)
+    selector.showFullScreen()
+    until(lambda: managed(selector) and fullscreen(selector) and selector.geometry() == geometry)
     received = []
     selector.selected.connect(received.append)
     for y in (80, 420, 800):
