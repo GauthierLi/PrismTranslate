@@ -1,0 +1,35 @@
+#!/bin/sh
+set -eu
+
+PRISM_ROOT=$(CDPATH= cd -- "$(dirname -- "$(readlink -f -- "$0")")" && pwd)
+PRISM_DATA=${XDG_DATA_HOME:-"$HOME/.local/share"}/prismtranslate
+PRISM_PYTHON=${PRISM_PYTHON:-python3}
+PRISM_PY_VERSION=$("$PRISM_PYTHON" -c 'import sys; assert (3,8) <= sys.version_info[:2] < (3,13), "PrismTranslate requires Python 3.8–3.12"; print(".".join(map(str,sys.version_info[:2])))')
+PRISM_ID=$(cat "$PRISM_ROOT/runtime-id")
+PRISM_RUNTIME="$PRISM_DATA/runtime-$PRISM_ID-py$PRISM_PY_VERSION"
+
+umask 077
+mkdir -p "$PRISM_DATA"
+# Multiple desktop launches must not install into the same environment concurrently.
+exec 9>"$PRISM_DATA/runtime.lock"
+flock 9
+if [ ! -f "$PRISM_RUNTIME/.ready" ]; then
+    PRISM_STAGE=$(mktemp -d "$PRISM_DATA/.runtime.XXXXXX")
+    trap 'rm -rf "$PRISM_STAGE"' EXIT HUP INT TERM
+    echo "棱镜翻译：正在准备离线运行环境…" >&2
+    "$PRISM_PYTHON" -m venv "$PRISM_STAGE" || {
+        echo "请先安装 python3-venv（Ubuntu: sudo apt install python3-venv）。" >&2
+        exit 1
+    }
+    "$PRISM_STAGE/bin/python" -m pip install --disable-pip-version-check --no-index \
+        --find-links "$PRISM_ROOT/wheels" pip==24.3.1 >&2
+    "$PRISM_STAGE/bin/python" -m pip install --disable-pip-version-check --no-index \
+        --find-links "$PRISM_ROOT/wheels" -r "$PRISM_ROOT/requirements.txt" >&2
+    touch "$PRISM_STAGE/.ready"
+    mv "$PRISM_STAGE" "$PRISM_RUNTIME"
+    trap - EXIT HUP INT TERM
+fi
+flock -u 9
+exec 9>&-
+export PYTHONPATH="$PRISM_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+exec "$PRISM_RUNTIME/bin/python" -m prismtranslate "$@"
