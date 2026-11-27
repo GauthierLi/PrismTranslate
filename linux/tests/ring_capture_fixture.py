@@ -2,7 +2,8 @@
 
 The dock hides only after the selector is actually active/fullscreen. Capturing
 before mapping the selector therefore bakes its red icons into the OCR frame.
-This models the reported ordering bug; it does not replace GNOME regression.
+This verifies capture ordering and native transient ownership. Its synthetic
+dock does not implement Mutter urgency or Ubuntu Dock; GNOME needs regression.
 """
 
 import json
@@ -60,6 +61,17 @@ def same_pixels(actual, expected):
         QImage.Format.Format_RGB32)
 
 
+def assert_transient_to_ball(widget, ball):
+    properties = subprocess.check_output(
+        ["xprop", "-id", str(int(widget.winId())), "WM_TRANSIENT_FOR", "_NET_WM_STATE"],
+        text=True, timeout=3)
+    transient = re.search(r"WM_TRANSIENT_FOR\(WINDOW\): window id # (0x[0-9a-fA-F]+)", properties)
+    assert transient and int(transient[1], 16) == int(ball.winId()), properties
+    assert "_NET_WM_STATE_DEMANDS_ATTENTION" not in properties, properties
+    assert ball.isActiveWindow(), "ring or label took focus from the pressed ball"
+    return properties
+
+
 with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {
     "XDG_CONFIG_HOME": temporary, "XDG_SESSION_TYPE": "x11",
 }):
@@ -114,6 +126,7 @@ with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {
         controller.region_selected = lambda frame, settings, translate_result: crops.append(
             (frame, translate_result))
         comparisons = 0
+        transient_properties = []
         for action in ("ocr", "ocr-translate"):
             for reverse in (False, True):
                 print("ring:", action, "reverse:", reverse, flush=True)
@@ -139,6 +152,13 @@ with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {
                 target = center + QPoint(-40 if action == "ocr" else 40, -40)
                 pointer("mousemove", target.x(), target.y())
                 until(lambda: ball.ring.selected == action)
+                transient_properties.append(assert_transient_to_ball(ball.ring, ball))
+                # Cover both immediate release and delayed labels for each OCR
+                # mode, keeping the native parent assertion on repeated maps.
+                if reverse:
+                    until(ball.ring.bubble.isVisible)
+                    until(lambda: mapped_at(ball.ring.bubble, ball.ring.bubble.pos()))
+                    transient_properties.append(assert_transient_to_ball(ball.ring.bubble, ball))
                 pointer("mouseup", 1)
                 until(lambda: bool(controller.selectors))
                 selector = controller.selectors[0]
@@ -241,6 +261,7 @@ with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {
                           "exposed_bottom_dock": 90, "ring_entries": 4,
                           "preview_and_crop_comparisons": comparisons,
                           "existing_entries": ["IPC", "menu", "hotkey"],
+                          "native_transient_properties": transient_properties,
                           "cancel_before_freeze": "passed", "busy_guard": "passed",
                           "no_compositor_fallback": "passed",
                           "result": "passed"}))

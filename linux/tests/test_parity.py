@@ -10,11 +10,12 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QPushButton
+from shiboken6 import isValid
 
 from prismtranslate.app import Controller, ipc_path
 from prismtranslate.capture import crop_screens
@@ -226,6 +227,35 @@ class ParityTests(unittest.TestCase):
             ball.ring.bubble.deleteLater()
             ball.ring.deleteLater()
             ball.deleteLater()
+
+    def test_ring_and_label_follow_ball_lifetime_without_clipping(self):
+        ball = FloatingBall(Settings(reduce_motion=True), QIcon())
+        ball.move(300, 300)
+        ball.show()
+        APP.processEvents()
+        ring, label = ball.ring, ball.ring.bubble
+        try:
+            center = ball.mapToGlobal(QPoint(36, 39))
+            ring.begin(center)
+            ring.update_pointer(ring.pos() + QPoint(44, 44))
+            until(label.isVisible, 2)
+            self.assertTrue(ring.isWindow())
+            self.assertTrue(label.isWindow())
+            self.assertEqual(ring.size().width(), 168)
+            # Owning widgets must not clip the ring/label to the 72px ball.
+            self.assertLess(ring.x(), ball.x())
+            self.assertLess(label.y(), ball.y())
+            self.assertEqual(ring.windowHandle().transientParent(), ball.windowHandle())
+            self.assertEqual(label.windowHandle().transientParent(), ball.windowHandle())
+            ball.hide()
+            self.assertFalse(ring.isVisible())
+            self.assertFalse(label.isVisible())
+            self.assertFalse(ring.label_timer.isActive())
+        finally:
+            ball.deleteLater()
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.assertFalse(isValid(ring))
+        self.assertFalse(isValid(label))
 
     def test_subtitle_center_anchor_selection_loading_and_outside_click(self):
         settings = Settings(overlay_center=[400, 300])

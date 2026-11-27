@@ -398,9 +398,8 @@ class Controller(QObject):
         prepare_fullscreen = prepare_fullscreen and x11_compositing_active()
         try:
             for screen in QApplication.screens():
-                # A tool-window gesture can expose Ubuntu Dock. Taking the
-                # frame before fullscreen would permanently bake its icons
-                # into the preview and OCR crop, even after the dock hides.
+                # The ring path waits for native fullscreen mapping before
+                # freezing; ordinary entry points keep their original order.
                 screenshot = QPixmap() if prepare_fullscreen else screen.grabWindow(0)
                 if not prepare_fullscreen and screenshot.isNull():
                     raise UserError("无法截取屏幕。请使用“从图片识别”，或检查桌面截屏权限。")
@@ -437,7 +436,7 @@ class Controller(QObject):
             else:
                 self.capture_completed(None, UserError("无法激活全屏截图，请重试或使用“从图片识别”。"))
             return
-        # Let the compositor finish hiding the dock after focus/fullscreen.
+        # Let the compositor finish the focus/fullscreen transition.
         # The selectors remain transparent and ignore selection input until
         # all screen frames have been acquired.
         QTimer.singleShot(350, lambda: self.freeze_capture_frames(selectors))

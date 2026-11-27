@@ -27,7 +27,10 @@ def ring_action(point, center, press, previous=None, busy=False):
 
 class QuickRing(QWidget):
     def __init__(self, ball):
-        super().__init__(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint |
+        # Keep these as top-level tools, transient to the focused ball. An
+        # unowned Tool maps against the client leader on X11; Mutter marks it
+        # demands-attention, which makes Ubuntu Dock reveal the app icon.
+        super().__init__(ball, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint |
                          Qt.WindowType.WindowStaysOnTopHint)
         self.ball = ball
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -38,7 +41,7 @@ class QuickRing(QWidget):
         self.selected = None
         self.selected_at = 0
         self.press = QPoint()
-        self.bubble = QLabel(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint |
+        self.bubble = QLabel(ball, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint |
                              Qt.WindowType.WindowStaysOnTopHint)
         self.bubble.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.bubble.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
