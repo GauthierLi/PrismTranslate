@@ -2,6 +2,8 @@
 
 一个 macOS 菜单栏小工具：把复制的文本通过 AI 接口翻译，并以悬浮字幕的形式显示在屏幕上。支持 OpenAI、Anthropic 与 Ollama 本地模型，可自定义远程接口地址、模型与目标语言。
 
+新增 Linux 原生桌面版本，目标 Ubuntu 20.04 / 22.04 / 24.04。安装、打包、桌面会话差异和测试方式见 [Linux 说明](linux/README.md)。下文为 macOS 版本说明。
+
 ![logo](Resources/logo.png)
 
 ## 功能特性

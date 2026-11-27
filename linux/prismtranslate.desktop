@@ -1,0 +1,27 @@
+[Desktop Entry]
+Type=Application
+Name=PrismTranslate
+Name[zh_CN]=棱镜翻译
+Comment=Translate clipboard text and screen OCR into floating subtitles
+Comment[zh_CN]=将剪贴板和截图文字翻译为悬浮字幕
+Exec=prismtranslate
+Icon=prismtranslate
+Terminal=false
+Categories=Utility;Office;
+StartupWMClass=PrismTranslate
+Actions=Translate;OCR;OCRTranslate;
+
+[Desktop Action Translate]
+Name=Translate clipboard
+Name[zh_CN]=翻译剪贴板
+Exec=prismtranslate --action translate
+
+[Desktop Action OCR]
+Name=Screen OCR
+Name[zh_CN]=截图识别
+Exec=prismtranslate --action ocr
+
+[Desktop Action OCRTranslate]
+Name=Screen OCR and translate
+Name[zh_CN]=截图翻译
+Exec=prismtranslate --action ocr-translate

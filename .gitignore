@@ -14,3 +14,9 @@ Resources/logo_square.png
 .vscode/
 .idea/
 *.xcuserstate
+
+# Linux packages and Python caches
+build-linux/
+__pycache__/
+*.pyc
+.venv/
