@@ -97,6 +97,21 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(selected[0].height(), 120)
         selector.deleteLater()
 
+    def test_preparing_selector_ignores_drag_but_allows_cancel(self):
+        selector = RegionSelector(APP.primaryScreen(), QPixmap())
+        selected, cancelled = [], []
+        selector.selected.connect(selected.append)
+        selector.cancelled.connect(lambda: cancelled.append(True))
+        QTest.mousePress(selector, Qt.MouseButton.LeftButton, pos=QPoint(30, 20))
+        QTest.mouseMove(selector, QPoint(100, 80))
+        QTest.mouseRelease(selector, Qt.MouseButton.LeftButton, pos=QPoint(100, 80))
+        self.assertIsNone(selector.start)
+        self.assertFalse(selected)
+        QTest.mouseClick(selector, Qt.MouseButton.RightButton)
+        QTest.keyClick(selector, Qt.Key.Key_Escape)
+        self.assertEqual(len(cancelled), 2)
+        selector.deleteLater()
+
     @unittest.skipUnless(shutil.which("tesseract"), "Tesseract not installed")
     def test_real_tesseract_ocr_and_missing_language(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -93,7 +93,7 @@ PYTHONPATH=linux .venv/bin/python -m unittest discover -s linux/tests -v
 PYTHONPATH=linux QT_QPA_PLATFORM=offscreen .venv/bin/python -m prismtranslate --smoke-test
 ```
 
-`tests/test_core.py` 使用真实本机 HTTP 服务检查三种协议、鉴权、错误和模型发现，不调用付费接口。桌面测试覆盖窗口、异步翻译、OCR、顶栏偏移后的预览与裁剪像素、混合 DPI 合成、皮肤、真实长按 / 拖动 / 取消、语言判断和长路径单实例进程。X11 下还检查真实快捷键。`wm_fixture.py` 使用 Openbox 与保留 27px 的顶栏验证真全屏；它不是 GNOME 实机结果。
+`tests/test_core.py` 使用真实本机 HTTP 服务检查三种协议、鉴权、错误和模型发现，不调用付费接口。桌面测试覆盖窗口、异步翻译、OCR、顶栏偏移后的预览与裁剪像素、混合 DPI 合成、皮肤、真实长按 / 拖动 / 取消、语言判断和长路径单实例进程。X11 下还检查真实快捷键。`wm_fixture.py` 使用 Openbox 与保留 27px 的顶栏验证真全屏；`ring_capture_fixture.py` 使用 Openbox、xcompmgr 和底部自动隐藏 Dock，验证长按两种 OCR 入口在全屏激活后冻结画面、正反拖选的预览与裁剪、取消恢复，以及 IPC / 菜单 / 快捷键入口。两者均不是 GNOME 实机结果。
 
 三版本容器验证：
 

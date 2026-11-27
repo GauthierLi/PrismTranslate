@@ -44,6 +44,10 @@ PYTHONPATH=/usr/lib/prismtranslate xvfb-run -a "$PRISM_RUNTIME/bin/python" \
 # A real EWMH window manager with a reserved 27px top panel.
 PYTHONPATH=/usr/lib/prismtranslate xvfb-run -a -s "-screen 0 1280x900x24" \
     "$PRISM_RUNTIME/bin/python" /repo/linux/tests/wm_fixture.py
+# A dock exposed by the real hold/release gesture must hide before freezing
+# the frame. Check both ring OCR modes, directions, preview/crop and cancel.
+PYTHONPATH=/usr/lib/prismtranslate xvfb-run -a -s "-screen 0 1280x900x24" \
+    "$PRISM_RUNTIME/bin/python" /repo/linux/tests/ring_capture_fixture.py
 # Verify the tar launcher can run with the same bundled dependencies.
 mkdir -p /tmp/prism-tar
 tar -xzf /repo/build-linux/prismtranslate-0.2.0-linux-amd64.tar.gz -C /tmp/prism-tar

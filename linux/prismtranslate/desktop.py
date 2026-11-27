@@ -241,6 +241,32 @@ class X11Hotkey(QObject):
             self.display = None
 
 
+def x11_compositing_active():
+    """Transparent capture staging requires an X11 compositing manager."""
+    library = ctypes.util.find_library("X11")
+    if not library:
+        return False
+    xlib = ctypes.CDLL(library)
+    xlib.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    xlib.XOpenDisplay.restype = ctypes.c_void_p
+    xlib.XDefaultScreen.argtypes = [ctypes.c_void_p]
+    xlib.XDefaultScreen.restype = ctypes.c_int
+    xlib.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+    xlib.XInternAtom.restype = ctypes.c_ulong
+    xlib.XGetSelectionOwner.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    xlib.XGetSelectionOwner.restype = ctypes.c_ulong
+    xlib.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    display = xlib.XOpenDisplay(None)
+    if not display:
+        return False
+    try:
+        name = "_NET_WM_CM_S{}".format(xlib.XDefaultScreen(display)).encode("ascii")
+        atom = xlib.XInternAtom(display, name, False)
+        return bool(xlib.XGetSelectionOwner(display, atom))
+    finally:
+        xlib.XCloseDisplay(display)
+
+
 class X11PointerMonitor(QObject):
     """Observe XI2 raw presses without grabbing events from other apps."""
 

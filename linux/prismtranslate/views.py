@@ -570,6 +570,11 @@ class RegionSelector(QWidget):
         super().__init__(None, Qt.WindowType.FramelessWindowHint |
                          Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Window)
         self.screenshot = screenshot
+        if screenshot.isNull():
+            # Used only during the ring entry's fullscreen/focus handoff.
+            # Keep this native window transparent while the compositor hides
+            # its dock; the eventual frame paints the whole window opaquely.
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.skin = skin
         self.pointer = QPoint()
         self.setMouseTracking(True)
@@ -583,6 +588,8 @@ class RegionSelector(QWidget):
         show_on_all_workspaces(self)
 
     def paintEvent(self, event):
+        if self.screenshot.isNull():
+            return
         painter = QPainter(self)
         readout = None
         # Keep the image at its captured scale even if a window manager moves
@@ -633,6 +640,8 @@ class RegionSelector(QWidget):
                 painter.drawText(rectangle, Qt.AlignmentFlag.AlignCenter, hint)
 
     def mousePressEvent(self, event):
+        if self.screenshot.isNull() and event.button() != Qt.MouseButton.RightButton:
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             self.start = event.position().toPoint()
             self.global_start = self.mapToGlobal(self.start)
@@ -658,7 +667,7 @@ class RegionSelector(QWidget):
                      abs(self.global_start.x() - point.x()), abs(self.global_start.y() - point.y()))
 
     def mouseReleaseEvent(self, event):
-        if self.start is None:
+        if self.start is None or self.screenshot.isNull():
             return
         global_rect = self.global_rect(event.position().toPoint())
         self.selection = self.selection_rect(event.position().toPoint())

@@ -12,13 +12,14 @@ import tempfile
 import uuid
 
 from PySide6.QtCore import QObject, QPoint, QLockFile, QRunnable, QThreadPool, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QActionGroup, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import QActionGroup, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QMessageBox, QSystemTrayIcon
 
 from .core import LANGUAGES, MODES, Settings, UserError, config_path, list_models, translate
 from .capture import crop_screens
-from .desktop import CaptureCancelled, X11Hotkey, X11PointerMonitor, capture_wayland, recognize, system_reduce_motion
+from .desktop import (CaptureCancelled, X11Hotkey, X11PointerMonitor, capture_wayland,
+                      recognize, system_reduce_motion, x11_compositing_active)
 from .floating import FloatingBall
 from .language import is_already
 from .pet import SKINS
@@ -101,7 +102,7 @@ class Controller(QObject):
         if has_tray:
             self.tray.show()
         self.ball.menu_requested.connect(self.menu.popup)
-        self.ball.quick_action.connect(lambda action: self.toggle_watch() if action == "watch" else self.action(action))
+        self.ball.quick_action.connect(self.quick_action)
         self.window.save_requested.connect(self.save)
         self.window.translate_requested.connect(self.translate_text)
         self.window.clipboard_requested.connect(self.translate_clipboard)
@@ -361,7 +362,16 @@ class Controller(QObject):
 
         self.start_job(list_models, completed)
 
-    def capture(self, translate_result):
+    def quick_action(self, action):
+        if action == "watch":
+            self.toggle_watch()
+        else:
+            # Finish the mouse-release event (including Qt's implicit grab)
+            # before transferring focus from the floating tool to fullscreen.
+            QTimer.singleShot(0, lambda: self.capture(action == "ocr-translate",
+                                                     prepare_fullscreen=True))
+
+    def capture(self, translate_result, *, prepare_fullscreen=False):
         if self.busy or self.quitting or not self.save():
             return
         settings = deepcopy(self.settings)
@@ -373,19 +383,26 @@ class Controller(QObject):
                 self.subtitle.remaining = max(1, self.subtitle.timer.remainingTime())
                 self.subtitle.timer.stop()
             widget.hide()
-        QTimer.singleShot(250, lambda: self.begin_capture(settings, translate_result))
+        QTimer.singleShot(250, lambda: self.begin_capture(settings, translate_result,
+                                                         prepare_fullscreen=prepare_fullscreen))
 
-    def begin_capture(self, settings, translate_result):
+    def begin_capture(self, settings, translate_result, *, prepare_fullscreen=False):
         if self.quitting:
             return
         if self.wayland:
             self.start_job(lambda: self.ocr_pipeline(capture_wayland(settings.ocr_languages),
                                                     settings, translate_result), self.capture_completed)
             return
+        # Without a compositor transparent X11 windows render black, so keep
+        # the existing capture path on those desktops.
+        prepare_fullscreen = prepare_fullscreen and x11_compositing_active()
         try:
             for screen in QApplication.screens():
-                screenshot = screen.grabWindow(0)
-                if screenshot.isNull():
+                # A tool-window gesture can expose Ubuntu Dock. Taking the
+                # frame before fullscreen would permanently bake its icons
+                # into the preview and OCR crop, even after the dock hides.
+                screenshot = QPixmap() if prepare_fullscreen else screen.grabWindow(0)
+                if not prepare_fullscreen and screenshot.isNull():
                     raise UserError("无法截取屏幕。请使用“从图片识别”，或检查桌面截屏权限。")
                 selector = RegionSelector(screen, screenshot, settings.ball_skin)
                 selector.completed.connect(lambda rect: self.region_selected(
@@ -401,8 +418,45 @@ class Controller(QObject):
             # Ignore deactivation caused by hiding our own windows before the
             # selector gains focus; later loss of focus cancels selection.
             self.selection_active = self.app.applicationState() == Qt.ApplicationState.ApplicationActive
+            if prepare_fullscreen:
+                self.prepare_capture_frames(tuple(self.selectors))
         except UserError as exc:
             self.capture_completed(None, exc)
+
+    def prepare_capture_frames(self, selectors, attempts=40):
+        # Timers must not revive an Esc-cancelled selection or a newer capture.
+        if self.quitting or tuple(self.selectors) != selectors:
+            return
+        ready = any(item.isActiveWindow() for item in selectors) and all(
+            item.isFullScreen() and
+            item.mapToGlobal(QPoint(0, 0)) == item.screen_geometry.topLeft() and
+            item.size() == item.screen_geometry.size() for item in selectors)
+        if not ready:
+            if attempts:
+                QTimer.singleShot(50, lambda: self.prepare_capture_frames(selectors, attempts - 1))
+            else:
+                self.capture_completed(None, UserError("无法激活全屏截图，请重试或使用“从图片识别”。"))
+            return
+        # Let the compositor finish hiding the dock after focus/fullscreen.
+        # The selectors remain transparent and ignore selection input until
+        # all screen frames have been acquired.
+        QTimer.singleShot(350, lambda: self.freeze_capture_frames(selectors))
+
+    def freeze_capture_frames(self, selectors):
+        if self.quitting or tuple(self.selectors) != selectors:
+            return
+        if not any(item.isActiveWindow() for item in selectors):
+            self.cancel_capture()
+            return
+        frames = [item.screen().grabWindow(0) for item in selectors]
+        if any(frame.isNull() for frame in frames):
+            self.capture_completed(None, UserError("无法截取屏幕。请使用“从图片识别”，或检查桌面截屏权限。"))
+            return
+        # Freeze every screen before painting any preview (cross-screen crops
+        # must never include another selector's mask or selection decoration).
+        for selector, frame in zip(selectors, frames):
+            selector.screenshot = frame
+            selector.update()
 
     def selection_changed(self, rectangle):
         for selector in self.selectors:
