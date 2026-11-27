@@ -12,7 +12,7 @@ from PySide6.QtCore import QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QFont, QImage, QMouseEvent, QPainter, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QScrollArea
 
 from prismtranslate.app import Controller
 from prismtranslate.core import Settings, UserError
@@ -64,14 +64,17 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(window.model.currentText(), "model-one")
         window.deleteLater()
 
-    def test_small_settings_window_keeps_primary_actions_visible(self):
+    def test_small_settings_window_scrolls_to_all_controls(self):
         window = SettingsWindow(Settings())
         window.resize(480, 500)
         window.show()
         QTest.qWait(30)
+        scroll = window.findChild(QScrollArea)
         for widget in (window.clipboard_button, window.save_button, window.test_button):
-            rectangle = QRect(widget.mapTo(window, QPoint(0, 0)), widget.size())
-            self.assertTrue(window.rect().contains(rectangle))
+            scroll.ensureWidgetVisible(widget)
+            APP.processEvents()
+            rectangle = QRect(widget.mapTo(scroll.viewport(), QPoint(0, 0)), widget.size())
+            self.assertTrue(scroll.viewport().rect().intersects(rectangle))
         window.deleteLater()
 
     def test_high_dpi_reverse_selection_uses_physical_pixels(self):

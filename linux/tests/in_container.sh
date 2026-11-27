@@ -13,9 +13,19 @@ if [ -n "${PRISM_TEST_APT_MIRROR:-}" ]; then
     done
 fi
 apt-get update -qq
-apt-get install -y -qq xvfb xauth xdotool fonts-dejavu-core fonts-noto-cjk desktop-file-utils dbus
+apt-get install -y -qq xvfb xauth xdotool x11-utils openbox xcompmgr fonts-dejavu-core fonts-noto-cjk desktop-file-utils dbus
+python3 - <<'PY'
+import hashlib, json
+from pathlib import Path
+root = Path("/repo/build-linux")
+manifest = json.loads((root / "manifest-amd64.json").read_text())
+for filename, expected in manifest["sha256"].items():
+    actual = hashlib.sha256((root / filename).read_bytes()).hexdigest()
+    assert actual == expected, filename + ": checksum mismatch"
+    print(actual + "  " + filename)
+PY
 # Ensure a repeated run validates the current payload even when its version is unchanged.
-apt-get install -y -qq --reinstall /repo/build-linux/prismtranslate_0.1.0_amd64.deb
+apt-get install -y -qq --reinstall /repo/build-linux/prismtranslate_0.2.0_amd64.deb
 desktop-file-validate /usr/share/applications/prismtranslate.desktop
 python3 --version
 getconf GNU_LIBC_VERSION
@@ -29,15 +39,21 @@ export XDG_RUNTIME_DIR=/tmp/prism-runtime
 xvfb-run -a prismtranslate --smoke-test
 PRISM_PY_VERSION=$(python3 -c 'import sys; print(".".join(map(str,sys.version_info[:2])))')
 PRISM_RUNTIME="/tmp/prism-data/prismtranslate/runtime-$(cat /usr/lib/prismtranslate/runtime-id)-py$PRISM_PY_VERSION"
-PYTHONPATH=/repo/linux xvfb-run -a "$PRISM_RUNTIME/bin/python" \
+PYTHONPATH=/usr/lib/prismtranslate xvfb-run -a "$PRISM_RUNTIME/bin/python" \
     -m unittest discover -s /repo/linux/tests -v
+# A real EWMH window manager with a reserved 27px top panel.
+PYTHONPATH=/usr/lib/prismtranslate xvfb-run -a -s "-screen 0 1280x900x24" \
+    "$PRISM_RUNTIME/bin/python" /repo/linux/tests/wm_fixture.py
 # Verify the tar launcher can run with the same bundled dependencies.
 mkdir -p /tmp/prism-tar
-tar -xzf /repo/build-linux/prismtranslate-0.1.0-linux-amd64.tar.gz -C /tmp/prism-tar
-xvfb-run -a /tmp/prism-tar/prismtranslate-0.1.0-linux-amd64/bin/prismtranslate --smoke-test
+tar -xzf /repo/build-linux/prismtranslate-0.2.0-linux-amd64.tar.gz -C /tmp/prism-tar
+xvfb-run -a /tmp/prism-tar/prismtranslate-0.2.0-linux-amd64/bin/prismtranslate --smoke-test
 if [ -d /verification ]; then
-    PYTHONPATH=/repo/linux xvfb-run -a -s "-screen 0 1280x900x24" \
+    PYTHONPATH=/usr/lib/prismtranslate xvfb-run -a -s "-screen 0 1280x900x24" \
         "$PRISM_RUNTIME/bin/python" /repo/linux/tests/preview.py \
         "/verification/ubuntu-$(. /etc/os-release; echo "$VERSION_ID").png"
+    PYTHONPATH=/usr/lib/prismtranslate xvfb-run -a -s "-screen 0 1280x900x24" \
+        "$PRISM_RUNTIME/bin/python" /repo/linux/tests/preview.py \
+        "/verification/ubuntu-$(. /etc/os-release; echo "$VERSION_ID")-dark.png" --dark
 fi
 echo "PASS: Ubuntu $(. /etc/os-release; echo "$VERSION_ID") amd64 — deb, tar, Qt X11, HTTP, OCR, hotkey"

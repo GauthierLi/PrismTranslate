@@ -2,21 +2,27 @@
 
 import argparse
 from copy import deepcopy
+import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import sys
 import tempfile
 import uuid
 
-from PySide6.QtCore import QObject, QLockFile, QRunnable, QThreadPool, QTimer, Signal, Slot
-from PySide6.QtGui import QIcon, QKeySequence, QShortcut
+from PySide6.QtCore import QObject, QPoint, QLockFile, QRunnable, QThreadPool, QTimer, Signal, Slot
+from PySide6.QtGui import QActionGroup, QIcon, QKeySequence, QShortcut
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QMessageBox, QSystemTrayIcon
 
-from .core import Settings, UserError, config_path, list_models, translate
-from .desktop import CaptureCancelled, X11Hotkey, capture_wayland, recognize
-from .views import FloatingBall, RegionSelector, STYLE, SettingsWindow, Subtitle
+from .core import LANGUAGES, MODES, Settings, UserError, config_path, list_models, translate
+from .capture import crop_screens
+from .desktop import CaptureCancelled, X11Hotkey, X11PointerMonitor, capture_wayland, recognize, system_reduce_motion
+from .floating import FloatingBall
+from .language import is_already
+from .pet import SKINS
+from .views import RegionSelector, SettingsWindow, Subtitle, apply_theme
 
 
 class JobSignals(QObject):
@@ -65,8 +71,21 @@ class Controller(QObject):
         self.menu.addAction("截图识别并翻译", lambda: self.capture(True))
         self.menu.addAction("从图片识别… · Ctrl+O", self.open_image)
         self.menu.addSeparator()
+        self.choice_groups = []
+        self.mode_menu = self.add_choices("快捷键功能 (Ctrl+Shift+T)", MODES,
+                                          lambda: self.settings.mode, self.change_mode)
+        self.language_menu = self.add_choices("目标语言", dict(LANGUAGES),
+                                              lambda: self.settings.target, self.change_target)
+        self.watch_action = self.menu.addAction("自动监听粘贴板", self.toggle_watch)
+        self.watch_action.setCheckable(True)
+        self.ball_action = self.menu.addAction("显示悬浮球", self.toggle_ball)
+        self.ball_action.setCheckable(True)
+        self.skin_menu = self.add_choices("宠物皮肤", SKINS, lambda: self.settings.ball_skin, self.change_skin)
+        self.menu.addSeparator()
         self.menu.addAction("设置…", self.show_settings)
+        self.menu.addAction("截图权限…", self.show_capture_help)
         self.menu.addAction("退出棱镜翻译 · Ctrl+Q", self.quit)
+        self.menu.aboutToShow.connect(self.sync_menu)
         self.open_shortcut = QShortcut(QKeySequence("Ctrl+O"), self.window)
         self.open_shortcut.activated.connect(self.open_image)
         self.quit_shortcut = QShortcut(QKeySequence("Ctrl+Q"), self.window)
@@ -80,11 +99,20 @@ class Controller(QObject):
         if has_tray:
             self.tray.show()
         self.ball.menu_requested.connect(self.menu.popup)
+        self.ball.quick_action.connect(lambda action: self.toggle_watch() if action == "watch" else self.action(action))
         self.window.save_requested.connect(self.save)
         self.window.translate_requested.connect(self.translate_text)
         self.window.clipboard_requested.connect(self.translate_clipboard)
         self.window.capture_requested.connect(self.capture)
         self.window.models_requested.connect(self.refresh_models)
+        self.window.permissions_requested.connect(self.show_capture_help)
+        self.save_timer = QTimer(self)
+        self.save_timer.setSingleShot(True)
+        self.save_timer.setInterval(300)
+        self.save_timer.timeout.connect(self.save)
+        self.window.changed.connect(self.save_timer.start)
+        self.ball.moved.connect(self.save_positions)
+        self.subtitle.moved.connect(self.save_positions)
         QApplication.clipboard().dataChanged.connect(self.clipboard_changed)
         self.last_clipboard = QApplication.clipboard().text()
         self.clipboard_timer = QTimer(self)
@@ -92,10 +120,17 @@ class Controller(QObject):
         self.clipboard_timer.setInterval(450)
         self.clipboard_timer.timeout.connect(self.auto_translate)
         self.hotkey = None
+        self.pointer_monitor = None
         if sys.platform == "linux" and app.platformName() == "xcb" and not self.wayland:
             try:
+                self.pointer_monitor = X11PointerMonitor(self)
+                self.pointer_monitor.clicked.connect(self.subtitle.dismiss_outside)
+                self.subtitle.visibility_changed.connect(self.pointer_monitor.set_active)
+            except UserError as exc:
+                self.window.status.setText(str(exc))
+            try:
                 self.hotkey = X11Hotkey(self)
-                self.hotkey.activated.connect(self.translate_clipboard)
+                self.hotkey.activated.connect(lambda: self.action(self.settings.mode))
             except UserError as exc:
                 self.window.status.setText(str(exc))
         elif self.wayland:
@@ -109,16 +144,75 @@ class Controller(QObject):
         if settings.provider == "ollama":
             self.refresh_models()
 
+    def add_choices(self, title, choices, current, callback):
+        menu = self.menu.addMenu(title)
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        for key, name in choices.items():
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setData(key)
+            action.setChecked(key == current())
+            action.triggered.connect(lambda checked=False, key=key: callback(key))
+            group.addAction(action)
+        self.choice_groups.append((group, current))
+        return menu
+
+    def sync_menu(self):
+        for group, current in self.choice_groups:
+            for action in group.actions():
+                action.setChecked(action.data() == current())
+        self.watch_action.setChecked(self.settings.watch_clipboard)
+        self.ball_action.setChecked(self.settings.show_ball)
+        for action, mode, title in zip(self.menu.actions()[:3], MODES,
+                                       ("翻译剪贴板", "截图识别 (OCR)", "截图识别并翻译")):
+            action.setText(title + (" · Ctrl+Shift+T" if self.hotkey and mode == self.settings.mode else ""))
+
+    def change_mode(self, mode):
+        self.window.mode.setCurrentIndex(self.window.mode.findData(mode))
+        self.save()
+
+    def change_target(self, target):
+        self.window.target.setCurrentIndex(self.window.target.findData(target))
+        self.save()
+
+    def change_skin(self, skin):
+        self.window.skin.setCurrentIndex(self.window.skin.findData(skin))
+        self.save()
+
+    def toggle_watch(self):
+        self.window.watch.setChecked(not self.window.watch.isChecked())
+        self.save()
+
+    def toggle_ball(self):
+        if not self.app.property("has_tray") and not self.window.isVisible() and self.window.ball.isChecked():
+            self.show_settings()
+        self.window.ball.setChecked(not self.window.ball.isChecked())
+        self.save()
+
+    def save_positions(self):
+        try:
+            self.settings.save()
+        except UserError as exc:
+            self.show_error(exc)
+
     def show_settings(self):
         self.window.show()
         self.window.raise_()
         self.window.activateWindow()
 
+    def show_capture_help(self):
+        QMessageBox.information(self.window, "截图权限",
+                                "Wayland 截图由桌面的系统授权界面处理。请确认已安装并启用当前桌面的截屏服务。"
+                                if self.wayland else
+                                "当前 X11 会话可直接框选截图，无需单独授予录屏权限。按 Esc 或右键取消；"
+                                "无法截屏时也可以使用“从图片识别”。")
     def tray_clicked(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             self.show_settings()
 
     def save(self):
+        self.save_timer.stop()
         self.window.apply()
         try:
             self.settings.save()
@@ -126,6 +220,7 @@ class Controller(QObject):
             self.show_error(exc)
             return False
         self.ball.setVisible(self.settings.show_ball)
+        self.ball.update()
         self.window.status.setText("设置已保存")
         return True
 
@@ -153,6 +248,7 @@ class Controller(QObject):
             self.app.quit()
 
     def show_error(self, error):
+        self.ball.set_mood("sad")
         self.window.status.setText(str(error))
         self.subtitle.show_result("", str(error), error=True)
 
@@ -169,16 +265,22 @@ class Controller(QObject):
             return
         settings = deepcopy(self.settings)
         self.set_busy(True, "正在翻译…")
+        self.subtitle.show_loading("翻译中…")
 
         def completed(result, error):
             self.set_busy(False, "翻译完成" if not error else str(error))
+            self.ball.set_mood("sad" if error else "happy")
             if error:
                 self.show_error(error)
+            elif result is None:
+                self.subtitle.hide()
+                self.window.status.setText("无需翻译")
+                self.ball.set_mood("idle")
             else:
                 self.subtitle.show_result(text, result)
                 self.suppress_clipboard = result
 
-        self.start_job(lambda: translate(text, settings), completed)
+        self.start_job(lambda: None if is_already(text, settings.target) else translate(text, settings), completed)
 
     def clipboard_changed(self):
         text = QApplication.clipboard().text()
@@ -215,7 +317,7 @@ class Controller(QObject):
                 selected = self.window.model.currentText()
                 self.window.model.clear()
                 self.window.model.addItems(models)
-                self.window.model.setEditText(selected)
+                self.window.model.setCurrentIndex(models.index(selected) if selected in models else (0 if models else -1))
 
         self.start_job(list_models, completed)
 
@@ -244,15 +346,24 @@ class Controller(QObject):
                 screenshot = screen.grabWindow(0)
                 if screenshot.isNull():
                     raise UserError("无法截取屏幕。请使用“从图片识别”，或检查桌面截屏权限。")
-                selector = RegionSelector(screen, screenshot)
-                selector.selected.connect(lambda image: self.region_selected(image, settings, translate_result))
+                selector = RegionSelector(screen, screenshot, settings.ball_skin)
+                selector.completed.connect(lambda rect: self.region_selected(
+                    crop_screens([(item.screen_geometry, item.screenshot) for item in self.selectors], rect),
+                    settings, translate_result))
+                selector.selection_changed.connect(self.selection_changed)
                 selector.cancelled.connect(self.cancel_capture)
                 self.selectors.append(selector)
-                selector.show()
+                # GNOME constrains ordinary windows below its top panel.
+                selector.showFullScreen()
                 selector.raise_()
                 selector.activateWindow()
         except UserError as exc:
             self.capture_completed(None, exc)
+
+    def selection_changed(self, rectangle):
+        for selector in self.selectors:
+            selector.selection = rectangle.translated(-selector.mapToGlobal(QPoint(0, 0))).intersected(selector.rect())
+            selector.update()
 
     def close_selectors(self):
         for selector in self.selectors:
@@ -292,17 +403,21 @@ class Controller(QObject):
 
     @staticmethod
     def ocr_pipeline(text, settings, translate_result):
-        return (text if translate_result else "", translate(text, settings) if translate_result else text)
+        if translate_result and not is_already(text, settings.target):
+            return text, translate(text, settings)
+        return "", text
 
     def capture_completed(self, result, error):
         self.restore_capture_windows()
         self.set_busy(False, "已取消截图" if isinstance(error, CaptureCancelled) else
                       ("识别完成" if not error else str(error)))
         if isinstance(error, CaptureCancelled):
+            self.ball.set_mood("idle")
             return
         if error:
             self.show_error(error)
         else:
+            self.ball.set_mood("happy")
             original, text = result
             self.subtitle.show_result(original, text)
             self.suppress_clipboard = text
@@ -319,6 +434,8 @@ class Controller(QObject):
                            self.capture_completed)
 
     def action(self, action):
+        if action == "primary":
+            action = self.settings.mode
         if action == "translate":
             self.translate_clipboard()
         elif action in ("ocr", "ocr-translate"):
@@ -343,12 +460,14 @@ class Controller(QObject):
         socket.setProperty("buffer", buffer)
         if b"\n" in buffer:
             action = buffer.split(b"\n", 1)[0].decode("ascii", errors="ignore")
-            if action in ("settings", "translate", "ocr", "ocr-translate"):
+            if action in ("settings", "primary", "translate", "ocr", "ocr-translate"):
                 self.action(action)
             socket.disconnectFromServer()
 
     def quit(self):
         self.quitting = True
+        self.ball.cancel_gesture()
+        self.save_timer.stop()
         self.close_selectors()
         self.clipboard_timer.stop()
         if self.jobs:
@@ -359,8 +478,15 @@ class Controller(QObject):
             self.app.quit()
 
     def cleanup(self):
+        self.ball.timer.stop()
+        self.ball.cancel_gesture()
+        self.ball.ring.bubble.close()
+        self.ball.ring.close()
+        self.save_timer.stop()
         if self.hotkey:
             self.hotkey.close()
+        if self.pointer_monitor:
+            self.pointer_monitor.close()
         self.server.close()
         try:
             self.settings.save()
@@ -368,15 +494,37 @@ class Controller(QObject):
             print(str(exc), file=sys.stderr)
 
 
+def ipc_path(runtime):
+    """Keep normal endpoints stable; shorten paths that cannot fit sun_path."""
+    runtime = Path(runtime).absolute()
+    runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = runtime / "prismtranslate.sock"
+    # Linux sockaddr_un has 108 bytes, including the terminating NUL.
+    if len(os.fsencode(path)) <= 107:
+        return path
+    identifier = hashlib.sha256(os.fsencode(runtime)).hexdigest()[:16]
+    directory = Path("/tmp") / ("prismtranslate-{}-{}".format(os.getuid(), identifier))
+    try:
+        directory.mkdir(mode=0o700)
+    except FileExistsError:
+        pass
+    status = directory.lstat()
+    if (not stat.S_ISDIR(status.st_mode) or status.st_uid != os.getuid()
+            or stat.S_IMODE(status.st_mode) != 0o700):
+        raise UserError("本机操作入口目录不安全，请检查：" + str(directory))
+    return directory / "ipc.sock"
+
+
 def main():
     parser = argparse.ArgumentParser(description="棱镜翻译 Linux 桌面端")
-    parser.add_argument("--action", choices=("settings", "translate", "ocr", "ocr-translate"), default="settings")
+    parser.add_argument("--action", choices=("settings", "primary", "translate", "ocr", "ocr-translate"), default="settings")
     parser.add_argument("--smoke-test", action="store_true", help="创建窗口后退出，不调用真实翻译服务")
     args = parser.parse_args()
     app = QApplication(sys.argv[:1])
     app.setApplicationName("PrismTranslate")
     app.setQuitOnLastWindowClosed(False)
-    app.setStyleSheet(STYLE)
+    apply_theme(app)
+    app.paletteChanged.connect(lambda *_: apply_theme(app))
     if args.smoke_test:
         settings = Settings()
         window = SettingsWindow(settings)
@@ -391,12 +539,15 @@ def main():
         return 0
     try:
         settings = Settings.load()
+        settings.reduce_motion = settings.reduce_motion or system_reduce_motion()
     except UserError as exc:
         QMessageBox.critical(None, "无法读取设置", str(exc))
         return 1
-    runtime = Path(os.environ.get("XDG_RUNTIME_DIR", config_path().parent))
-    runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
-    server_name = str(runtime / "prismtranslate.sock")
+    try:
+        server_name = str(ipc_path(os.environ.get("XDG_RUNTIME_DIR", config_path().parent)))
+    except (OSError, UserError) as exc:
+        print("无法准备本机操作入口：" + str(exc), file=sys.stderr)
+        return 1
     lock = QLockFile(server_name + ".lock")
     if not lock.tryLock(0):
         socket = QLocalSocket()

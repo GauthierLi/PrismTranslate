@@ -9,13 +9,24 @@ import subprocess
 from urllib.parse import unquote, urlsplit
 import uuid
 
-from PySide6.QtCore import QObject, QSocketNotifier, Signal
+from PySide6.QtCore import QObject, QPoint, QSocketNotifier, Signal
 
 from .core import UserError
 
 
 class CaptureCancelled(UserError):
     pass
+
+
+def system_reduce_motion():
+    if not shutil.which("gsettings"):
+        return False
+    try:
+        result = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "enable-animations"],
+                                capture_output=True, text=True, timeout=2)
+        return result.returncode == 0 and result.stdout.strip() == "false"
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def recognize(path, languages):
@@ -178,5 +189,99 @@ class X11Hotkey(QObject):
         if self.display:
             for mask in self.masks:
                 self.xlib.XUngrabKey(self.display, self.key, mask, self.root)
+            self.xlib.XCloseDisplay(self.display)
+            self.display = None
+
+
+class X11PointerMonitor(QObject):
+    """Observe XI2 raw presses without grabbing events from other apps."""
+
+    clicked = Signal(QPoint)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        library = ctypes.util.find_library("X11")
+        if not library:
+            raise UserError("X11 鼠标监听不可用。")
+        xi_library = ctypes.util.find_library("Xi")
+        if not xi_library:
+            raise UserError("请安装 libxi1 以支持字幕外部点击关闭。")
+        self.xlib = ctypes.CDLL(library)
+        self.xi = ctypes.CDLL(xi_library)
+        self.xlib.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        self.xlib.XOpenDisplay.restype = ctypes.c_void_p
+        self.xlib.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        self.xlib.XDefaultRootWindow.restype = ctypes.c_ulong
+        self.xlib.XQueryPointer.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
+                                          ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
+                                          *([ctypes.POINTER(ctypes.c_int)] * 4), ctypes.POINTER(ctypes.c_uint)]
+        self.xlib.XQueryPointer.restype = ctypes.c_int
+        self.xlib.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        self.xlib.XConnectionNumber.argtypes = [ctypes.c_void_p]
+        self.xlib.XConnectionNumber.restype = ctypes.c_int
+        self.xlib.XPending.argtypes = [ctypes.c_void_p]
+        self.xlib.XPending.restype = ctypes.c_int
+        self.xlib.XNextEvent.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        self.xlib.XFlush.argtypes = [ctypes.c_void_p]
+        self.xi.XIQueryVersion.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
+
+        class EventMask(ctypes.Structure):
+            _fields_ = [("deviceid", ctypes.c_int), ("mask_len", ctypes.c_int),
+                        ("mask", ctypes.POINTER(ctypes.c_ubyte))]
+
+        class Cookie(ctypes.Structure):
+            _fields_ = [("type", ctypes.c_int), ("serial", ctypes.c_ulong),
+                        ("send_event", ctypes.c_int), ("display", ctypes.c_void_p),
+                        ("extension", ctypes.c_int), ("evtype", ctypes.c_int),
+                        ("cookie", ctypes.c_uint), ("data", ctypes.c_void_p)]
+
+        self.cookie_type = Cookie
+        self.mask_bytes = (ctypes.c_ubyte * 4)()
+        self.mask = EventMask(1, 4, self.mask_bytes)  # XIAllMasterDevices
+        self.xi.XISelectEvents.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
+                                         ctypes.POINTER(EventMask), ctypes.c_int]
+        self.xi.XISelectEvents.restype = ctypes.c_int
+        self.display = self.xlib.XOpenDisplay(None)
+        if not self.display:
+            raise UserError("无法观察 X11 鼠标。")
+        major, minor = ctypes.c_int(2), ctypes.c_int(0)
+        if self.xi.XIQueryVersion(self.display, ctypes.byref(major), ctypes.byref(minor)) != 0:
+            self.xlib.XCloseDisplay(self.display)
+            self.display = None
+            raise UserError("桌面未提供 XInput2 鼠标事件。")
+        self.root = self.xlib.XDefaultRootWindow(self.display)
+        self.notifier = QSocketNotifier(self.xlib.XConnectionNumber(self.display),
+                                        QSocketNotifier.Type.Read, self)
+        self.notifier.activated.connect(self.read_events)
+        self.set_active(False)
+
+    def set_active(self, active):
+        if not self.display:
+            return
+        self.mask_bytes[1] = 0x80 if active else 0  # XI_RawButtonPress = 15
+        self.xi.XISelectEvents(self.display, self.root, ctypes.byref(self.mask), 1)
+        self.xlib.XFlush(self.display)
+        self.notifier.setEnabled(active)
+
+    def read_events(self, *_):
+        event = (ctypes.c_long * 24)()
+        while self.display and self.xlib.XPending(self.display):
+            self.xlib.XNextEvent(self.display, ctypes.byref(event))
+            cookie = ctypes.cast(ctypes.byref(event), ctypes.POINTER(self.cookie_type)).contents
+            if cookie.type == 35 and cookie.evtype == 15:  # GenericEvent
+                self.query_position()
+
+    def query_position(self):
+        root, child = ctypes.c_ulong(), ctypes.c_ulong()
+        rx, ry, wx, wy = (ctypes.c_int() for _ in range(4))
+        mask = ctypes.c_uint()
+        if self.xlib.XQueryPointer(self.display, self.root, ctypes.byref(root), ctypes.byref(child),
+                                  ctypes.byref(rx), ctypes.byref(ry), ctypes.byref(wx), ctypes.byref(wy),
+                                  ctypes.byref(mask)):
+            self.clicked.emit(QPoint(rx.value, ry.value))
+
+    def close(self):
+        self.notifier.setEnabled(False)
+        if self.display:
             self.xlib.XCloseDisplay(self.display)
             self.display = None

@@ -13,11 +13,11 @@ import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 ARCHES = {"amd64": "manylinux_2_28_x86_64", "arm64": "manylinux_2_31_aarch64"}
 DEPENDENCIES = (
     "python3 (>= 3.8), python3 (<< 3.13), python3-venv, util-linux, ca-certificates, "
-    "libgl1, libegl1, libfontconfig1, libdbus-1-3, libgssapi-krb5-2, libxkbcommon-x11-0, "
+    "libgl1, libegl1, libfontconfig1, libdbus-1-3, libgssapi-krb5-2, libxkbcommon-x11-0, libxi1, "
     "libxcb-cursor0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, "
     "libxcb-render-util0, libxcb-xinerama0, libxcb-randr0, libxcb-shape0, "
     "libxcb-xfixes0, tesseract-ocr, tesseract-ocr-eng, tesseract-ocr-chi-sim"
@@ -65,7 +65,7 @@ def build(arch, output, wheel_dir):
         shutil.copytree(ROOT / "prismtranslate", app / "prismtranslate",
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         shutil.copy(ROOT.parent / "Resources/logo.png", app / "prismtranslate/logo.png")
-        for filename in ("requirements.txt", "README.md", "prismtranslate.desktop"):
+        for filename in ("requirements.txt", "README.md", "PARITY.md", "prismtranslate.desktop"):
             shutil.copy(ROOT / filename, app / filename)
         shutil.copy(ROOT / "prismtranslate-launcher", app / "prismtranslate-launcher")
         (app / "prismtranslate-launcher").chmod(0o755)
@@ -79,8 +79,13 @@ def build(arch, output, wheel_dir):
                 sys.executable, "-m", "pip", "download", "--only-binary=:all:",
                 "--platform", ARCHES[arch], "--python-version", "38", "--implementation", "cp",
                 "--abi", "abi3", "--abi", "cp38", "--dest", str(app / "wheels"),
-                "-r", str(ROOT / "requirements.txt"), "pip==24.3.1",
+                "PySide6-Essentials==6.6.3.1", "dbus-next==0.2.3", "six==1.17.0", "pip==24.3.1",
             ], check=True)
+            # langdetect ships a source archive, but contains no native code.
+            # Build its portable wheel on the host; all Linux binaries above
+            # still come from the pinned manylinux/abi3 distributions.
+            subprocess.run([sys.executable, "-m", "pip", "wheel", "--no-deps",
+                            "--wheel-dir", str(app / "wheels"), "langdetect==1.0.9"], check=True)
         digest = hashlib.sha256()
         for path in sorted(app.rglob("*")):
             if path.is_file():
@@ -120,6 +125,11 @@ def build(arch, output, wheel_dir):
             "version": VERSION, "architecture": arch, "python": "3.8–3.12",
             "ubuntu_targets": ["20.04", "22.04", "24.04"], "sha256": checksums,
         }
+        if shutil.which("git"):
+            revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT.parent,
+                                      text=True, capture_output=True)
+            if revision.returncode == 0:
+                manifest["source_revision"] = revision.stdout.strip()
         (output / f"manifest-{arch}.json").write_text(json.dumps(manifest, indent=2) + "\n")
         for filename, checksum in checksums.items():
             print(checksum + "  " + filename)

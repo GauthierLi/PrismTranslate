@@ -16,11 +16,12 @@ LANGUAGES = [
     ("ar", "العربية"), ("th", "ไทย"), ("vi", "Tiếng Việt"),
 ]
 PROVIDERS = {
-    "openai": ("OpenAI 兼容", "https://api.openai.com/v1", "gpt-4o-mini"),
-    "anthropic": ("Anthropic 兼容", "https://api.anthropic.com/v1", ""),
+    "openai": ("OpenAI 协议", "https://api.openai.com/v1", "gpt-4o-mini"),
+    "anthropic": ("Anthropic 协议", "https://api.anthropic.com/v1", "claude-3-5-sonnet-latest"),
     "ollama": ("Ollama 本地", "http://127.0.0.1:11434", ""),
 }
 OLLAMA_URL = "http://127.0.0.1:11434"
+MODES = {"translate": "翻译", "ocr": "OCR 识别", "ocr-translate": "OCR翻译"}
 
 
 class UserError(Exception):
@@ -49,11 +50,15 @@ class Settings:
     watch_clipboard: bool = False
     show_original: bool = True
     show_ball: bool = True
+    ball_skin: str = "classic"
+    mode: str = "translate"
+    reduce_motion: bool = False
     font_size: int = 22
     seconds: int = 8
     ocr_languages: str = "eng+chi_sim"
     ball_position: list = field(default_factory=list)
     overlay_position: list = field(default_factory=list)
+    overlay_center: list = field(default_factory=list)
 
     @classmethod
     def load(cls, path=None):
@@ -83,7 +88,9 @@ class Settings:
             raise ValueError("invalid font size")
         if type(self.seconds) is not int or not 2 <= self.seconds <= 60:
             raise ValueError("invalid duration")
-        for key in ("watch_clipboard", "show_original", "show_ball"):
+        if self.ball_skin not in ("classic", "cat", "shiba", "panda", "chick") or self.mode not in MODES:
+            raise ValueError("invalid skin or mode")
+        for key in ("watch_clipboard", "show_original", "show_ball", "reduce_motion"):
             if type(getattr(self, key)) is not bool:
                 raise ValueError("invalid boolean")
         for key in PROVIDERS:
@@ -92,7 +99,7 @@ class Settings:
                 raise ValueError("invalid provider profile")
         if not isinstance(self.ocr_languages, str):
             raise ValueError("invalid OCR languages")
-        for position in (self.ball_position, self.overlay_position):
+        for position in (self.ball_position, self.overlay_position, self.overlay_center):
             if not isinstance(position, list) or (position and (
                 len(position) != 2 or any(type(value) is not int for value in position)
             )):
