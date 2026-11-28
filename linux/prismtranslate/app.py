@@ -227,6 +227,8 @@ class Controller(QObject):
             self.show_error(exc)
 
     def show_settings(self):
+        if self.window.isMinimized():
+            self.window.showNormal()
         self.window.show()
         self.window.raise_()
         self.window.activateWindow()
@@ -377,7 +379,9 @@ class Controller(QObject):
         settings = deepcopy(self.settings)
         self.set_busy(True, "请选择截图区域 · Esc 取消")
         self.capturing = True
-        self.capture_restore = [widget for widget in (self.window, self.ball, self.subtitle) if widget.isVisible()]
+        # A minimized settings window is already off screen; re-showing it would un-minimize it.
+        self.capture_restore = [widget for widget in (self.window, self.ball, self.subtitle)
+                                if widget.isVisible() and not widget.isMinimized()]
         for widget in self.capture_restore:
             if widget is self.subtitle and self.subtitle.timer.isActive():
                 self.subtitle.remaining = max(1, self.subtitle.timer.remainingTime())

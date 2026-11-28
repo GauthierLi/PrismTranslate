@@ -107,7 +107,10 @@ class SettingsWindow(QDialog):
     permissions_requested = Signal()
 
     def __init__(self, settings):
-        super().__init__()
+        # A parentless Qt dialog is still mapped as a DIALOG transient for the
+        # client leader; mutter refuses to minimize non-NORMAL windows. Use an
+        # ordinary top-level window so the title bar minimize works.
+        super().__init__(None, Qt.WindowType.Window)
         self.settings = settings
         self.current_provider = settings.provider
         self.setWindowTitle("棱镜翻译 · 设置")

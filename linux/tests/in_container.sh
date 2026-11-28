@@ -13,7 +13,7 @@ if [ -n "${PRISM_TEST_APT_MIRROR:-}" ]; then
     done
 fi
 apt-get update -qq
-apt-get install -y -qq xvfb xauth xdotool x11-utils openbox xcompmgr fonts-dejavu-core fonts-noto-cjk desktop-file-utils dbus
+apt-get install -y -qq xvfb xauth xdotool x11-utils openbox xcompmgr mutter fonts-dejavu-core fonts-noto-cjk desktop-file-utils dbus
 python3 - <<'PY'
 import hashlib, json
 from pathlib import Path
@@ -48,6 +48,10 @@ PYTHONPATH=/usr/lib/prismtranslate xvfb-run -a -s "-screen 0 1280x900x24" \
 # the frame. Check both ring OCR modes, directions, preview/crop and cancel.
 PYTHONPATH=/usr/lib/prismtranslate xvfb-run -a -s "-screen 0 1280x900x24" \
     "$PRISM_RUNTIME/bin/python" /repo/linux/tests/ring_capture_fixture.py
+# Mutter (GNOME's WM) refuses to minimize non-NORMAL windows; Openbox does not.
+PYTHONPATH=/usr/lib/prismtranslate xvfb-run -a -s "-screen 0 1280x900x24" \
+    dbus-run-session -- bash /repo/linux/tests/with_mutter.sh \
+    "$PRISM_RUNTIME/bin/python" /repo/linux/tests/minimize_fixture.py
 # Verify the tar launcher can run with the same bundled dependencies.
 mkdir -p /tmp/prism-tar
 tar -xzf /repo/build-linux/prismtranslate-0.2.0-linux-amd64.tar.gz -C /tmp/prism-tar
