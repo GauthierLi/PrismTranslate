@@ -39,6 +39,20 @@ def iconic(widget):
     return "Iconic" in xprop(widget, "WM_STATE")
 
 
+def minimize(widget):
+    # xdotool sends WM_CHANGE_STATE(IconicState): Mutter's minimize path, the
+    # same one the title bar button uses. A just-restored window can still
+    # receive Qt's queued activation, which un-minimizes it, so allow retries.
+    for _ in range(5):
+        subprocess.run(["xdotool", "windowminimize", str(int(widget.winId()))], check=True)
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            QTest.qWait(20)
+            if iconic(widget) and widget.isMinimized():
+                return
+    raise AssertionError("settings window did not minimize")
+
+
 def restored(widget):
     # Mutter 46 drops a minimize request sent before it has refocused the window.
     return (not iconic(widget) and not widget.isMinimized() and widget.isVisible() and
@@ -58,16 +72,12 @@ with tempfile.TemporaryDirectory() as temporary:
         assert "_NET_WM_WINDOW_TYPE_DIALOG" not in properties, properties
         assert "WM_TRANSIENT_FOR:  not found" in properties, properties
         assert "_NET_WM_ACTION_MINIMIZE" in properties, properties
-        # xdotool sends WM_CHANGE_STATE(IconicState): Mutter's minimize path,
-        # the same one the title bar button uses.
-        subprocess.run(["xdotool", "windowminimize", str(int(window.winId()))], check=True)
-        until(lambda: iconic(window) and window.isMinimized())
+        minimize(window)
         # Tray, menu and `--action settings` all restore through show_settings.
         controller.show_settings()
         until(lambda: restored(window))
         # Capturing while minimized must not pop the window back afterwards.
-        subprocess.run(["xdotool", "windowminimize", str(int(window.winId()))], check=True)
-        until(lambda: iconic(window) and window.isMinimized())
+        minimize(window)
         controller.capture(False)
         assert window not in controller.capture_restore
         until(lambda: bool(controller.selectors), 3)
